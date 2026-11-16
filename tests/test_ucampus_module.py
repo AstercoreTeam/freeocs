@@ -246,6 +246,8 @@ def test_page_agent_has_no_auto_submit() -> None:
     assert "isContentOnlyPage" in code
     assert "foc-answer" in code
     assert "setPanelAnswer" in code
+    assert "looksLikeFillPage" in code
+    assert "waitForFillFields" in code
     assert "discussionEditorText" in code
     assert "pointerdown" in code
     assert "initialVideoWithQuestions" in code

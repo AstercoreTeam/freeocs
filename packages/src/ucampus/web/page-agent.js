@@ -1815,12 +1815,51 @@
     return false;
   }
 
+  function looksLikeFillPage() {
+    for (const doc of pageDocuments()) {
+      const text = (doc.body?.innerText || "").slice(0, 4000);
+      if (/Complete the following summary|Fill in the (?:blank|blanks)|填空题|fill[- ]in[- ]the[- ]blank/i.test(text)) {
+        return true;
+      }
+      if (doc.querySelector(
+        ".question-common-abs-scoop, .comp-scoop-reply, .comp-abs-input, .fe-scoop"
+      )) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  async function waitForFillFields(timeoutMs = 10000) {
+    if (!looksLikeFillPage()) return false;
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline && automationRunning) {
+      const controls = answerControls();
+      if (["blank", "blanks", "essays", "essay"].includes(controls.type)) {
+        updateRunLog(`填空控件已加载：${controls.type}`, "info");
+        return true;
+      }
+      await wait(500);
+    }
+    if (!automationRunning) return false;
+    updateRunLog("等待填空控件超时，继续检测页面", "warn");
+    return false;
+  }
+
   async function waitForQuestionReady(attempts = 3, delay = 2000) {
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       if (dismissBlockingDialog()) await wait(500);
       const question = currentQuestion();
       const controls = answerControls();
       const video = videoForAutomation();
+      if (looksLikeFillPage() &&
+        !["blank", "blanks", "essays"].includes(controls.type)) {
+        if (attempt < attempts) {
+          updateRunLog("填空页控件尚未加载，等待…", "info");
+          await wait(delay);
+        }
+        continue;
+      }
       if ((question && looksLikeQuestion(question)) ||
         controls.type !== "unsupported" ||
         video.video ||
@@ -1982,19 +2021,9 @@
     submittedSteps.add(submittedKey);
     pendingNavigation = true;
     updateRunLog(`已点击：${action.label}`, "success", true);
-    if (action.label === "下一题" || action.label === "下一步") {
-      for (let retry = 0; retry < 12; retry += 1) {
-        await wait(500);
-        const next = pageActionButton();
-        if (next && (next.label === "下一题" || next.label === "下一步")) {
-          next.element.click();
-          await wait(1500);
-          updateRunLog(`已点击：${next.label}`, "success", true);
-          actionAdvanced = true;
-          break;
-        }
-      }
-    }
+    // Do not click a second "next" automatically: after the first click the
+    // next page may be a fill/ordering page whose controls have not rendered
+    // yet.  The main loop will inspect that page and answer it.
     return true;
   }
 
@@ -2400,7 +2429,8 @@
       return false;
     }
     const earlyControls = answerControls();
-    if (!currentQuestion() && earlyControls.type !== "dubbing" && pageActionButton()) {
+    if (!currentQuestion() && !looksLikeFillPage() &&
+      earlyControls.type !== "dubbing" && pageActionButton()) {
       await clickPageAction();
       return { type: "content" };
     }
