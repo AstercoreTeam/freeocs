@@ -172,7 +172,6 @@ CORE_SECTIONS: list[dict[str, Any]] = [
                 help="修改后需要同步扩展设置页的端口。",
             ),
             field("auto_start", "启动时开启中继", "boolean", True),
-            field("active_tab_only", "仅操作活动标签页", "boolean", True),
             field("request_timeout", "请求超时（秒）", "number", 15, min=3, max=120, step=1),
             field("agent_enabled", "启用页面 Agent", "boolean", True),
         ],
@@ -267,7 +266,8 @@ class SettingsStore:
             keys.add(key)
 
         with self._lock:
-            if section_id in self._section_owner:
+            owner = self._section_owner.get(section_id)
+            if owner is not None and owner != package_id:
                 raise SettingsError(f"设置 section id 已被占用：{section_id}")
             normalized = deepcopy(section)
             normalized["group"] = "plugin" if package_type == "plugin" else "module"
@@ -276,7 +276,11 @@ class SettingsStore:
             normalized.setdefault("title", package_id)
             normalized.setdefault("description", "")
             normalized.setdefault("fields", [])
-            self._package_sections.setdefault(package_id, []).append(normalized)
+            sections = self._package_sections.setdefault(package_id, [])
+            if owner == package_id:
+                # Idempotent reload: replace the old definition in place.
+                sections[:] = [item for item in sections if item.get("id") != section_id]
+            sections.append(normalized)
             self._section_owner[section_id] = package_id
 
     def unregister_package(self, package_id: str) -> None:

@@ -115,11 +115,12 @@ POST /extension/result
 
 | action | args | 说明 |
 | --- | --- | --- |
-| `dom.call` | `{method, args}` | 在活动标签页执行通用 DOM 操作 |
+| `dom.call` | `{method, args}` | 在目标标签页执行通用 DOM 操作 |
 | `page.info` | `{}` | 当前页 URL/title/host/readyState |
-| `page.navigate` | `{url}` | 活动标签页跳转 |
+| `page.navigate` | `{url}` | 目标标签页跳转 |
 | `tabs.list` | `{}` | 列出标签页概要 |
-| `tabs.activate` | `{url_pattern}` | 按 URL 子串/通配符激活 |
+| `tabs.activate` | `{url_pattern}` | 按 URL 子串/通配符激活并设为目标 |
+| `tabs.target` | `{tab_id}` | 显式绑定目标标签页（不要求窗口活动） |
 | `fetch` | `{url, method, headers, body_base64, timeout}` | 后台跨域请求（可选） |
 | `ping` | `{}` | 连通性检查 |
 
@@ -252,13 +253,13 @@ while (enabled) {
 
 ### 4.3 分发到页面
 
-1. 取活动标签页（`chrome.tabs.query({active:true,currentWindow:true})`）。
+1. 解析目标标签页：优先 `tabs.target` 显式绑定的 tab；否则在**所有窗口**的活动标签页中选最近访问的 http(s) 页；再否则选任意 http(s) 标签页。不使用 `currentWindow` 限制。
 2. 若 URL 不是 http/https，报错。
 3. `chrome.tabs.sendMessage(tabId, {type:"freeocs:dom", method, args})`。
 4. 若 content script 未注入（接收方不存在），尝试 `chrome.scripting.executeScript` 注入 `content.js` 后重试一次。
 5. 返回结果或错误。
 
-v1 只操作活动标签页；模块启动前会检查当前页是否匹配目标站点。后续可支持指定 tab。
+U校园模块会在开始前绑定一个匹配的标签页；页面内控制面板点“开始/接管本页”时，会把**当前标签页**绑定为目标，避免操作错页。
 
 ## 5. content script：DOM 操作
 
@@ -281,6 +282,8 @@ v1 只操作活动标签页；模块启动前会检查当前页是否匹配目�
 | `waitFor` | `[selector, timeout_ms]` | bool | MutationObserver |
 | `getPageInfo` | `[]` | object | url/title/host/readyState/viewport |
 | `pressKey` | `[key, selector?]` | bool | 键盘事件（可选） |
+
+页面内的 U校园 控制面板注入在目标标签页右下角；它不属于页面题目扫描范围（会从 `#freeocs-ucampus-panel` 中排除）。
 
 约束：
 
@@ -357,7 +360,7 @@ extension/
 2. 复制 `shared/*` 到 `dist/<browser>/`。
 3. 复制对应 manifest 为 `dist/<browser>/manifest.json`。
 4. 生成 zip（便于分发），并计算版本。
-5. 应用启动时确保 `dist/` 已解压/复制到 `<data>/extension/<browser>/`，供用户“加载已解压”。
+5. 应用启动时把 `dist/<browser>` 复制到 `~/FreeOCS/extensions/<browser>/`（非隐藏路径，兼容 snap Firefox），供用户“加载已解压”。
 
 ### 7.2 Chromium MV3 manifest
 
@@ -420,7 +423,7 @@ extension/
 
 **Chrome / Edge / Brave**
 
-1. 应用内点击“打开扩展目录”，得到 `<data>/extension/chromium`。
+1. 应用内点击“打开扩展目录”，得到 `~/FreeOCS/extensions/chromium`。
 2. 打开 `chrome://extensions`（Edge 为 `edge://extensions`）。
 3. 打开“开发者模式”。
 4. “加载已解压的扩展程序” → 选择该目录。
@@ -428,7 +431,8 @@ extension/
 
 **Firefox**
 
-1. 应用内点击“打开扩展目录”，得到 `<data>/extension/firefox`。
+1. 应用内点击“打开扩展目录”，得到 `~/FreeOCS/extensions/firefox`。
+   - 如果 Firefox 是 snap 版，**不要**把扩展放在 `~/.local/...` 等隐藏目录；snap 的 home 接口可能读不到，表现为 `background.js` 加载失败。
 2. 打开 `about:debugging#/runtime/this-firefox`。
 3. “临时载入附加组件” → 选择该目录下的 `manifest.json`。
 4. v1 为临时加载，Firefox 重启后需重新载入；后续可提供签名 XPI。
@@ -459,7 +463,7 @@ extension/
 | --- | --- |
 | Chrome / Edge / Brave | 109+（MV3） |
 | Firefox | 115+（MV3 事件页） |
-| 活动标签页 | 是（v1 仅活动页） |
+| 目标标签页 | 支持指定 tab；不限于活动窗口 |
 | 多标签页 | 列表/激活；不并行执行 |
 | iframe | `all_frames`，跨源各自注入 |
 | Shadow DOM | content script 不自动穿透；Agent 自行处理 |

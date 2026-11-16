@@ -117,6 +117,10 @@ def build_paths(*, portable: bool = False, repo: Path | None = None) -> AppPaths
         data = _xdg("XDG_DATA_HOME", ".local/share") / APP_NAME
         cache = _xdg("XDG_CACHE_HOME", ".cache") / APP_NAME
 
+    # Keep the extension outside XDG hidden directories: snap-packaged Firefox
+    # cannot read hidden paths such as ~/.local/share via its home interface.
+    public_extension_dir = Path.home() / "FreeOCS" / "extensions"
+
     return AppPaths(
         repo=root,
         config_dir=config,
@@ -128,7 +132,7 @@ def build_paths(*, portable: bool = False, repo: Path | None = None) -> AppPaths
         package_data_dir=data / "package-data",
         models_dir=data / "models",
         audio_dir=data / "audio",
-        extension_dir=data / "extension",
+        extension_dir=public_extension_dir,
         web_dir=root / "web",
         packages_src_dir=root / "packages" / "src",
         packages_dist_dir=root / "packages" / "dist",

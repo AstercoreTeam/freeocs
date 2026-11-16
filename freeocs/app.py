@@ -50,7 +50,9 @@ class Application:
             "web.bridge", self.web, title="浏览器中继", description="webcat 扩展中继"
         )
 
-        configured_port = int(port or self.settings.core_get("bridge", "port", 8765))
+        configured_port = (
+            int(port) if port is not None else int(self.settings.core_get("bridge", "port", 8765))
+        )
         self.server = LocalServer(configured_port, events=self.events, bridge=self.web)
         self.server.start()
         self.http_base_url = self.server.base_url
@@ -85,6 +87,13 @@ class Application:
                 else:
                     logger.warning("扩展资源缺失：%s", browser)
                     continue
+                # Browser loaders (and snap home interfaces) prefer world-readable
+                # extension assets; 600 files from zip/copy are needlessly strict.
+                for path in [target, *target.rglob("*")]:
+                    try:
+                        path.chmod(0o755 if path.is_dir() else 0o644)
+                    except OSError:
+                        pass
                 logger.info("浏览器扩展已准备：%s", target)
             except OSError as exc:
                 logger.warning("准备浏览器扩展失败 %s: %s", browser, exc)

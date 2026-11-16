@@ -94,6 +94,9 @@ class WebcatBridge:
     def activate(self, url_pattern: str, *, timeout: float = 15.0) -> dict[str, Any]:
         return self.enqueue("tabs.activate", {"url_pattern": url_pattern}, timeout=timeout) or {}
 
+    def set_target(self, tab_id: int | str, *, timeout: float = 5.0) -> dict[str, Any]:
+        return self.enqueue("tabs.target", {"tab_id": tab_id}, timeout=timeout) or {}
+
     # -- status ------------------------------------------------------------
     @property
     def connected(self) -> bool:

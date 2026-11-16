@@ -242,19 +242,22 @@ class WebBridge(Protocol):
         """返回 {connected, browser, extension_version, active_tab, last_seen, agents}。"""
 
     def call(self, method: str, *args: Any, timeout: float = 15.0) -> Any:
-        """对当前活动标签页执行通用 DOM 操作。"""
+        """对目标标签页执行通用 DOM 操作。"""
 
     def page_info(self) -> dict[str, Any]:
         """{url, title, host, ready_state, frame}。"""
 
     def navigate(self, url: str) -> dict[str, Any]:
-        """让活动标签页跳转；返回 {ok}。"""
+        """让目标标签页跳转；返回 {ok}。"""
 
     def list_tabs(self) -> list[dict[str, Any]]:
         """[{id, url, title, active}]。"""
 
     def activate(self, url_pattern: str) -> dict[str, Any]:
-        """按 URL 子串/通配符激活标签页。"""
+        """按 URL 子串/通配符激活标签页，并设为操作目标。"""
+
+    def set_target(self, tab_id: int | str) -> dict[str, Any]:
+        """显式绑定目标标签页，不要求它是活动窗口。"""
 ```
 
 通用 DOM 方法见 `05-webcat-bridge.md`。模块通常不直接使用 `call` 完成整站自动化，而是通过页面 Agent；`call` 用于轻量检查/导航。
@@ -532,7 +535,7 @@ class MyModule(Module):
 | --- | --- |
 | `ui` | `theme`、`locale`、`start_page`、`log_level` |
 | `llm` | `base_url`、`api_key`、`model`、`temperature`、`max_tokens`、`timeout`、`extra_headers` |
-| `bridge` | `port`、`auto_start`、`active_tab_only`、`request_timeout`、`agent_enabled` |
+| `bridge` | `port`、`auto_start`、`request_timeout`、`agent_enabled` |
 | `android` | `adb_path`、`device_serial`、`click_jitter`、`dump_timeout`、`screenshot_timeout`、`ocr_fallback` |
 | `capabilities` | 动态生成：每个多提供者能力一个 select |
 

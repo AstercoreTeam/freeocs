@@ -52,19 +52,53 @@ class UcampusModule(Module):
         self._updated_at = _now()
         self._transcript_cache: dict[str, dict[str, Any]] = {}
         self._auto_started_url = ""
+        self._target_tab_id = ""
 
     # -- Module API --------------------------------------------------------
     def start(self) -> None:
+        self._activate(self._choose_target_tab())
+
+    def _choose_target_tab(self) -> str:
+        """Prefer an active U校园 tab, searching tabs in every browser window."""
+        web = self.ctx.web
+        if web is None or not getattr(web, "connected", False):
+            return ""
+        try:
+            tabs = web.list_tabs(timeout=3)
+        except Exception as exc:  # noqa: BLE001
+            self.ctx.log("warn", f"读取浏览器标签页失败：{exc}")
+            return ""
+        candidates = [
+            tab for tab in tabs
+            if "unipus.cn" in str(tab.get("url", ""))
+        ]
+        if not candidates:
+            return ""
+        active = [tab for tab in candidates if tab.get("active")]
+        chosen = active[0] if active else candidates[0]
+        tab_id = str(chosen.get("id", "") or "")
+        if tab_id:
+            try:
+                web.set_target(tab_id, timeout=3)
+            except Exception as exc:  # noqa: BLE001
+                self.ctx.log("warn", f"绑定目标标签页失败：{exc}")
+        return tab_id
+
+    def _activate(self, target_tab_id: str = "") -> None:
         with self._lock:
             self._active = True
             self._running = True
             self._run_id = uuid.uuid4().hex
+            self._target_tab_id = str(target_tab_id or "")
             self._lease_client = ""
             self._lease_seen = 0.0
             self._commands.clear()
             self._commands.append({"action": "start"})
             self._state = "running"
-            self._message = "正在连接 U校园页面…"
+            self._message = (
+                f"正在连接 U校园标签页（{self._target_tab_id}）…"
+                if self._target_tab_id else "正在连接 U校园页面…"
+            )
             self._completed = 0
             self._answered = 0
             self._skipped = 0
@@ -73,7 +107,10 @@ class UcampusModule(Module):
             if self._page_url:
                 self._auto_started_url = self._page_url
             self._touch()
-        self.ctx.log("info", "已请求开始；等待 U校园页面 Agent 连接")
+        self.ctx.log(
+            "info",
+            f"已请求开始；目标标签页 {self._target_tab_id or '自动选择'}",
+        )
 
     def stop(self) -> None:
         with self._lock:
@@ -115,6 +152,7 @@ class UcampusModule(Module):
                     "last_answer": self._last_answer,
                     "completed": self._completed,
                     "lease_client": self._lease_client,
+                    "target_tab_id": self._target_tab_id,
                 },
             }
 
@@ -143,6 +181,8 @@ class UcampusModule(Module):
     def handle_agent_request(self, method: str, payload: dict[str, Any]) -> Any:
         handlers = {
             "poll": self._poll,
+            "start": self._start_from_agent,
+            "stop": self._stop_from_agent,
             "report": self._report,
             "log": self._log,
             "answer": self._answer,
@@ -184,6 +224,17 @@ class UcampusModule(Module):
                 self._answered = self._completed
 
             page_url = str(payload.get("url", "") or "")
+            tab_id = str(payload.get("__tab_id", "") or "")
+            if self._active and self._target_tab_id and tab_id != self._target_tab_id:
+                return {
+                    "active": True,
+                    "lease": False,
+                    "auto_start": False,
+                    "run_id": self._run_id,
+                    "command": None,
+                    "status": "本标签页不是当前控制页",
+                    "completed": self._completed,
+                }
             is_course_detail = bool(payload.get("is_course_detail"))
             auto_start = bool(self.ctx.settings.get("auto_start_on_course", False))
             if (
@@ -198,12 +249,13 @@ class UcampusModule(Module):
                 self._active = True
                 self._running = True
                 self._run_id = uuid.uuid4().hex
+                self._target_tab_id = tab_id
                 self._lease_client = client_id
                 self._lease_seen = now
                 self._commands.clear()
                 self._commands.append({"action": "start"})
                 self._state = "running"
-                self._message = "检测到课程页，自动开始"
+                self._message = f"检测到课程页，自动开始（标签页 {tab_id or '未知'}）"
                 self._completed = 0
                 self._answered = 0
                 self._skipped = 0
@@ -235,6 +287,15 @@ class UcampusModule(Module):
                 "completed": self._completed,
             }
         return response
+
+    def _start_from_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
+        tab_id = str(payload.get("__tab_id", "") or "")
+        self._activate(tab_id)
+        return self.status()
+
+    def _stop_from_agent(self, _payload: dict[str, Any]) -> dict[str, Any]:
+        self.stop()
+        return self.status()
 
     def _report(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self._lock:

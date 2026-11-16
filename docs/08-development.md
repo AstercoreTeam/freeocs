@@ -120,7 +120,7 @@ uv run python main.py --port 8765 --portable
   ├── models/                  ASR/OCR 模型
   ├── audio/                   TTS 输出
   ├── logs/                    freeocs.log, ucampus.log, unrecognized.log
-  └── extension/{chromium,firefox}/
+  └── extension/{chromium,firefox}/   # 实际使用 ~/FreeOCS/extensions/
 ```
 
 `--portable` 时改为可执行文件旁的 `data/`。
@@ -163,7 +163,7 @@ extension/dist/
 - 复制 `extension/shared/*`。
 - 复制对应 manifest。
 - 版本号从 manifest 读取并注入注册信息。
-- 应用启动时把 `dist/<browser>` 复制/解压到 `<data>/extension/<browser>`。
+- 应用启动时把 `dist/<browser>` 复制到 `~/FreeOCS/extensions/<browser>`（避免 snap Firefox 无法读取隐藏目录）。
 
 ### 5.3 构建应用
 

@@ -39,6 +39,11 @@ def build() -> list[Path]:
             for path in sorted(target.rglob("*")):
                 if path.is_file():
                     zf.write(path, path.relative_to(target).as_posix())
+        for path in [target, *target.rglob("*")]:
+            try:
+                path.chmod(0o755 if path.is_dir() else 0o644)
+            except OSError:
+                pass
         outputs.append(archive)
         print(f"[extension] {browser}: {target.relative_to(ROOT)}")
         print(f"[extension] zip: {archive.relative_to(ROOT)}")

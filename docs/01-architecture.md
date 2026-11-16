@@ -179,7 +179,7 @@ FreeOCS/
 
 要点：
 
-- 页面 Agent 以本地 bundle 注入页面主世界，能访问 DOM 和页面 JS；content script 只提供 token 校验的 postMessage 桥与 API 转发。
+- 页面 Agent 以本地 bundle 注入页面主世界，能访问 DOM 和页面 JS；content script 只提供 token 校验的 postMessage 桥与 API 转发。U校园 在页面右下角注入轻量控制面板，用于绑定当前标签页并启停。
 - Agent 通过扩展后台代理访问本地 HTTP，避免 HTTPS 页面直接请求 HTTP 的混合内容问题，也避免把本地 API 暴露给页面脚本。
 - Python 模块是唯一的“大脑”：模型调用、ASR/TTS、状态机、日志都在 Python 侧；页面 Agent 只负责 DOM 扫描/回填/导航。
 
@@ -279,7 +279,7 @@ FreeOCS/
 | 模型 | `<data>/models/<name>/` | 同左 |
 | TTS 输出 | `<data>/audio/` | 同左 |
 | 日志 | `<data>/logs/freeocs.log` | 同左 |
-| 扩展 | `<data>/extension/{chromium,firefox}/` | 同左 |
+| 扩展 | `~/FreeOCS/extensions/{chromium,firefox}/` | `%USERPROFILE%\FreeOCS\extensions\` |
 
 支持 `--portable`：上述路径改为可执行文件旁的 `./data/`，便于 U 盘携带。
 

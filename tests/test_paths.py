@@ -19,3 +19,10 @@ def test_non_portable_paths_have_expected_names() -> None:
     assert paths.settings_file.name == "settings.json"
     assert paths.log_file.name == "freeocs.log"
     assert paths.packages_src_dir.name == "src"
+
+
+def test_extension_dir_is_not_hidden() -> None:
+    paths = build_paths(portable=False)
+    assert paths.extension_dir.name == "extensions"
+    assert paths.extension_dir.parent.name == "FreeOCS"
+    assert not paths.extension_dir.name.startswith(".")

@@ -46,7 +46,7 @@ class LocalServer:
         events: EventBus | None = None,
         bridge: WebcatBridge | None = None,
     ) -> None:
-        self.requested_port = int(port or 8765)
+        self.requested_port = 8765 if port is None else int(port)
         self.packages = packages
         self.modules = modules
         self.events = events or EventBus()
@@ -381,6 +381,9 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._error(404, "not found")
             module_id = unquote(parts[2])
             method = unquote(parts[3])
+            tab_id = self.headers.get("X-FreeOCS-Tab-Id", "").strip()
+            if tab_id:
+                body["__tab_id"] = tab_id
             try:
                 result = self.server.app.module_request(module_id, method, body)
             except FreeOCSError as exc:

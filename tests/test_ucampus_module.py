@@ -82,6 +82,37 @@ def test_ucampus_loads_and_starts(ucampus_host) -> None:
     assert state["running"] is True
 
 
+def test_ucampus_binds_target_tab(ucampus_host) -> None:
+    host, _registry, _manager = ucampus_host
+    host.handle_agent_request("ucampus", "start", {"__tab_id": "101"})
+    first = host.handle_agent_request(
+        "ucampus",
+        "poll",
+        {
+            "client_id": "client-101",
+            "__tab_id": "101",
+            "url": "https://course.unipus.cn/app/cmgt/resource-detail/1",
+            "has_content": True,
+            "is_course_detail": True,
+        },
+    )
+    assert first["lease"] is True
+    assert first["command"] == {"action": "start"}
+    second = host.handle_agent_request(
+        "ucampus",
+        "poll",
+        {
+            "client_id": "client-202",
+            "__tab_id": "202",
+            "url": "https://course.unipus.cn/app/cmgt/resource-detail/2",
+            "has_content": True,
+            "is_course_detail": True,
+        },
+    )
+    assert second["lease"] is False
+    assert "不是当前控制页" in second["status"]
+
+
 def test_ucampus_auto_start_on_course(ucampus_host) -> None:
     host, _registry, manager = ucampus_host
     manager.settings.save_section("ucampus", {"auto_start_on_course": True})
@@ -147,3 +178,5 @@ def test_page_agent_has_no_auto_submit() -> None:
     assert '"提交"' not in section
     assert "confirmSubmitDialog" in code
     assert "button.click();" not in code[code.index("async function confirmSubmitDialog"):code.index("async function clickPageAction")]
+    assert "freeocs-ucampus-panel" in code
+    assert "updateControlPanel" in code

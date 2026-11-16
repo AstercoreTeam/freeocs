@@ -226,7 +226,7 @@
 
 **决策**：
 
-- 保留页面侧逻辑，移植为模块的 `web/page-agent.js`（无悬浮 UI、无 GM API）。
+- 保留页面侧逻辑，移植为模块的 `web/page-agent.js`（含轻量控制面板、无 GM API）。
 - Python 模块负责模型、ASR/TTS、提示词/解析、会话状态、租约、日志、设置。
 - 页面 Agent 通过 `__freeocs` 桥调用模块端点；扩展只做注入与传输。
 - 移除所有提交/发布点击，增加 `waiting` 状态。

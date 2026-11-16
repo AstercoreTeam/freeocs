@@ -38,7 +38,8 @@ class WhisperASR:
                 from faster_whisper import WhisperModel
             except ImportError as exc:
                 raise ProviderError(
-                    "未安装 faster-whisper，请执行：pip install faster-whisper av（或安装 asr extra）",
+                    "未安装 faster-whisper（打包版未内置）。请改用设置 → 能力绑定中的云端 ASR，"
+                    "或使用源码版安装 faster-whisper/av 并放置模型。",
                     provider="asr_whisper",
                 ) from exc
             try:

@@ -364,7 +364,7 @@
       "[class*='ques-title']",
     ];
     const candidates = [...doc.querySelectorAll(selectors.join(","))]
-      .filter((element) => visible(element) && !element.closest("#uca-panel"))
+      .filter((element) => visible(element) && !element.closest("#uca-panel, #freeocs-ucampus-panel"))
       .map((element) => element.innerText?.trim() || "")
       .filter((text) => text.length >= 12 && text.length <= 12000);
     if (candidates.length) return candidates[0];
@@ -372,7 +372,7 @@
     const root = doc.querySelector("main, article, [class*='content'], [class*='Content']") || doc.body || doc;
     const clone = root.cloneNode(true);
     clone.querySelectorAll(
-      "#uca-panel, script, style, nav, header, footer, aside, button, [role='button'], " +
+      "#uca-panel, #freeocs-ucampus-panel, script, style, nav, header, footer, aside, button, [role='button'], " +
       "[class*='nav'], [class*='menu'], [class*='sidebar'], [class*='catalog'], " +
       "[class*='directory'], [class*='video'], [class*='player'], [class*='tab']"
     ).forEach((element) => element.remove());
@@ -388,7 +388,7 @@
 
   function optionChoiceGroups(doc) {
     return [...doc.querySelectorAll(".question-common-abs-choice")]
-      .filter((group) => visible(group) && !group.closest("#uca-panel"))
+      .filter((group) => visible(group) && !group.closest("#uca-panel, #freeocs-ucampus-panel"))
       .map((group) => {
         const options = [...group.querySelectorAll(".option")]
           .filter((option) => visible(option))
@@ -417,7 +417,7 @@
 
   function optionDropdowns(doc) {
     return [...doc.querySelectorAll(".scoop-select-wrapper")]
-      .filter((wrapper) => visible(wrapper) && !wrapper.closest("#uca-panel"))
+      .filter((wrapper) => visible(wrapper) && !wrapper.closest("#uca-panel, #freeocs-ucampus-panel"))
       .map((wrapper, index) => {
         const trigger = wrapper.querySelector(".ant-dropdown-trigger");
         const textElement = wrapper.querySelector(".user-answer-text");
@@ -484,7 +484,7 @@
         return { type: "roleplay", doc };
       }
       const radios = [...doc.querySelectorAll("input[type='radio'], [role='radio']")]
-        .filter((element) => controlVisible(element) && !element.closest("#uca-panel"));
+        .filter((element) => controlVisible(element) && !element.closest("#uca-panel, #freeocs-ucampus-panel"));
       if (radios.length >= 2) {
         const groups = new Set(
           radios.map((radio) => radio.name || radio.getAttribute("name") || "default")
@@ -540,7 +540,7 @@
 
       const recordButtons = [...doc.querySelectorAll(".button-record, .record-icon")]
         .filter((button) =>
-          button.getClientRects().length > 0 && !button.closest("#uca-panel")
+          button.getClientRects().length > 0 && !button.closest("#uca-panel, #freeocs-ucampus-panel")
         )
         .filter((button, index, list) =>
           !list.some((other, otherIndex) =>
@@ -605,7 +605,7 @@
         "textarea[placeholder], input[placeholder], " +
         "[contenteditable='true'][data-placeholder]"
       )].filter((element) => {
-        if (!visible(element) || element.closest("#uca-panel")) return false;
+        if (!visible(element) || element.closest("#uca-panel, #freeocs-ucampus-panel")) return false;
         const hint = [
           element.className,
           element.getAttribute("placeholder"),
@@ -914,13 +914,30 @@
     });
   }
 
+  function unsupportedVideoSignal() {
+    const matcher = /(?:视频|video|播放器)[^\n]{0,40}(?:不支持|无法播放|播放失败|加载失败|格式不支持)|(?:不支持|无法播放|播放失败)[^\n]{0,40}(?:视频|video|播放器)/i;
+    for (const doc of pageDocuments()) {
+      const text = (doc.body?.innerText || "").slice(0, 5000);
+      if (text && matcher.test(text)) return true;
+    }
+    return false;
+  }
+
+  async function handleUnsupportedVideo(reason) {
+    setStatus("视频无法播放，按内容页继续…");
+    updateRunLog(`视频不可用（${reason}），继续下一项`, "warn");
+    await wait(1200);
+    dismissBlockingDialog();
+    await wait(500);
+  }
+
   function nextQuestionButton() {
     const matcher = /^(下一题|下一步|下一页|下一节|下一课|继续学习|继续|完成并继续|next(?:\s+(?:question|step|lesson))?|continue)\s*[>›→]?$/i;
     for (const doc of pageDocuments()) {
       const buttons = [...doc.querySelectorAll(
         "button, a, [role='button'], [class*='next'], [class*='Next']"
       )]
-        .filter((element) => visible(element) && !element.closest("#uca-panel"));
+        .filter((element) => visible(element) && !element.closest("#uca-panel, #freeocs-ucampus-panel"));
       const button = buttons.find((element) => {
         const text = (element.innerText || element.getAttribute("aria-label") ||
           element.getAttribute("title") || "").trim();
@@ -937,7 +954,7 @@
     return [...doc.querySelectorAll(
         "[role='tab'], button, [role='button'], [class*='tab'], [class*='Tab'], [class*='radio-button-wrapper'], [class*='sub-tab'], [class*='subTab']"
       )].filter((element) =>
-        visible(element) && !element.closest("#uca-panel") &&
+        visible(element) && !element.closest("#uca-panel, #freeocs-ucampus-panel") &&
         !element.matches("[class*='taskItemContainer']") &&
         !element.closest(".ant-collapse-header, [class*='collapse-header']")
       );
@@ -1086,7 +1103,7 @@
   function nextNestedTab() {
     for (const doc of pageDocuments()) {
       const tabs = [...doc.querySelectorAll(".ant-tabs-tab")]
-        .filter((element) => visible(element) && !element.closest("#uca-panel"))
+        .filter((element) => visible(element) && !element.closest("#uca-panel, #freeocs-ucampus-panel"))
         .map((element) => ({
           element,
           label: (element.innerText || "").trim().replace(/\s+/g, " "),
@@ -1118,7 +1135,7 @@
       if (!/Read the conversation about/i.test(text)) continue;
       const target = [...doc.querySelectorAll("div, span, a, button")]
         .filter((element) => visible(element) &&
-          !element.closest("#uca-panel") &&
+          !element.closest("#uca-panel, #freeocs-ucampus-panel") &&
           (element.innerText || "").trim() === "Speaking task" &&
           !element.querySelector("div, span, a, button"))
         .sort((left, right) =>
@@ -1140,7 +1157,7 @@
         "[role='tab'], [class*='tab'], .pc-menu-node-name, .pc-slider-menu-micro"
       )];
       for (const element of candidates) {
-        if (!visible(element) || element.closest("#uca-panel")) continue;
+        if (!visible(element) || element.closest("#uca-panel, #freeocs-ucampus-panel")) continue;
         const label = (element.innerText || "").trim().replace(/\s+/g, " ");
         if (!label || label.length > 40) continue;
         if (/^Module\s+\d+$/i.test(label)) continue;
@@ -1283,7 +1300,7 @@
   function courseTasks() {
     return pageDocuments().flatMap((doc) =>
       [...doc.querySelectorAll("[class*='taskItemContainer']")]
-        .filter((element) => visible(element) && !element.closest("#uca-panel"))
+        .filter((element) => visible(element) && !element.closest("#uca-panel, #freeocs-ucampus-panel"))
         .map((element) => ({
           element,
           label: element.querySelector("[class*='taskTypeName']")?.innerText
@@ -1307,7 +1324,7 @@
     return pageDocuments().flatMap((doc) =>
       [...doc.querySelectorAll("[class*='tabItemContainer'], [role='tab']")]
         .filter((element) =>
-          visible(element) && !element.closest("#uca-panel") &&
+          visible(element) && !element.closest("#uca-panel, #freeocs-ucampus-panel") &&
           /^Module\s+\d+$/i.test((element.innerText || "").trim())
         )
     );
@@ -1470,7 +1487,7 @@
   function activeCourseTask(tasks) {
     const activeNode = pageDocuments().flatMap((doc) =>
       [...doc.querySelectorAll("[class*='ipublishNode_1'], [aria-current='step'], [aria-current='page']")]
-    ).find((element) => visible(element) && !element.closest("#uca-panel"));
+    ).find((element) => visible(element) && !element.closest("#uca-panel, #freeocs-ucampus-panel"));
     if (activeNode) {
       const selectedTask = activeNode.matches("[class*='taskItemContainer']")
         ? activeNode
@@ -1523,7 +1540,7 @@
       if (catalog) return { element: catalog.element, label: catalog.label, catalog: true };
     }
     const nextButton = nextQuestionButton();
-    if (!preferCatalog && nextButton) {
+    if (nextButton) {
       const label = (nextButton.innerText || nextButton.getAttribute("aria-label") ||
         nextButton.getAttribute("title") || "下一题").trim();
       return { element: nextButton, label };
@@ -1539,16 +1556,16 @@
 
   function dismissBlockingDialog() {
     for (const doc of pageDocuments()) {
-      const labels = new Set(["我知道了", "知道了"]);
+      const labels = new Set(["我知道了", "知道了", "我知道了。"]);
       const interactive = [...doc.querySelectorAll("button, [role='button'], a")]
-        .filter((element) => visible(element) && !element.closest("#uca-panel"))
+        .filter((element) => visible(element) && !element.closest("#uca-panel, #freeocs-ucampus-panel"))
         .find((element) => labels.has((element.innerText || "").trim()));
       if (interactive) {
         interactive.click();
         return true;
       }
       const fallback = [...doc.querySelectorAll("div, span")]
-        .filter((element) => visible(element) && !element.closest("#uca-panel"))
+        .filter((element) => visible(element) && !element.closest("#uca-panel, #freeocs-ucampus-panel"))
         .find((element) => {
           const text = (element.textContent || "").trim();
           if (!labels.has(text)) return false;
@@ -1616,17 +1633,23 @@
 
   async function waitForQuestionReady(attempts = 3, delay = 2000) {
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      if (dismissBlockingDialog()) await wait(500);
       const question = currentQuestion();
       const controls = answerControls();
       const video = videoForAutomation();
       if ((question && looksLikeQuestion(question)) ||
         controls.type !== "unsupported" ||
         video.video ||
-        isDiscussionPage()) {
+        isDiscussionPage() ||
+        pageActionButton() ||
+        nextQuestionButton() ||
+        nextCatalogSection() ||
+        contentTabs().length > 0 ||
+        unsupportedVideoSignal()) {
         return true;
       }
       if (attempt < attempts) {
-        updateRunLog(`页面题目尚未加载，等待后重试（${attempt}/${attempts}）`, "info");
+        updateRunLog(`页面题目/内容尚未加载，等待后重试（${attempt}/${attempts}）`, "info");
         await wait(delay);
       }
     }
@@ -1666,7 +1689,7 @@
       for (const element of doc.querySelectorAll("button, [role='button'], a")) {
         const label = (element.innerText || "").trim().replace(/\s+/g, "");
         if (!labels.includes(label)) continue;
-        if (!visible(element) || element.closest("#uca-panel")) continue;
+        if (!visible(element) || element.closest("#uca-panel, #freeocs-ucampus-panel")) continue;
         if (element.disabled || element.getAttribute("aria-disabled") === "true") continue;
         const rect = element.getBoundingClientRect();
         if (rect.left > (window.innerWidth || 1200) * 0.85) continue;
@@ -1682,7 +1705,7 @@
       for (const element of doc.querySelectorAll("button, [role='button'], a")) {
         const label = (element.innerText || "").trim().replace(/\s+/g, "");
         if (!labels.includes(label)) continue;
-        if (!visible(element) || element.closest("#uca-panel")) continue;
+        if (!visible(element) || element.closest("#uca-panel, #freeocs-ucampus-panel")) continue;
         if (element.disabled || element.getAttribute("aria-disabled") === "true") continue;
         return { element, label };
       }
@@ -1988,6 +2011,7 @@
   }
 
   async function processQuestion() {
+    if (dismissBlockingDialog()) await wait(500);
     if (pendingNavigation) {
       pendingNavigation = false;
       setStatus("页面加载中，等待题目…");
@@ -2035,8 +2059,16 @@
       ["choice", "dropdown", "blank", "blanks", "oral"].includes(previewControls.type)
     );
     if (detectedVideo.error && !videoWithQuestions) {
+      if (unsupportedVideoSignal()) {
+        await handleUnsupportedVideo(detectedVideo.error);
+        return { type: "content" };
+      }
       await reportUnknown(currentQuestion(), detectedVideo.error);
       return false;
+    }
+    if (!detectedVideo.video && unsupportedVideoSignal()) {
+      await handleUnsupportedVideo("页面提示视频格式/播放不支持");
+      return { type: "content" };
     }
     if (detectedVideo.video && !videoWithQuestions) {
       try {
@@ -2047,8 +2079,10 @@
         }
         return false;
       } catch (error) {
-        await reportUnknown(currentQuestion(), error.message);
-        return false;
+        // Firefox/snap codecs or cross-origin players may report an error.
+        // Continue to the next content item instead of stopping the whole run.
+        await handleUnsupportedVideo(error.message);
+        return { type: "content" };
       }
     }
 
@@ -2416,6 +2450,132 @@
     }
   }
 
+  let controlPanelCollapsed = false;
+
+  function createControlPanel() {
+    try {
+      if (window.top !== window.self) return null;
+      if (document.getElementById("freeocs-ucampus-panel")) {
+        return document.getElementById("freeocs-ucampus-panel");
+      }
+      controlPanelCollapsed = Boolean(gmGet("panelCollapsed", false));
+      const host = document.createElement("div");
+      host.id = "freeocs-ucampus-panel";
+      host.innerHTML = `
+        <div class="foc-head">
+          <span class="foc-dot" data-foc="dot"></span>
+          <strong>FreeOCS · U校园</strong>
+          <span class="foc-page" data-foc="page"></span>
+          <button type="button" class="foc-collapse" data-foc="collapse" title="折叠/展开">—</button>
+        </div>
+        <div class="foc-body">
+          <div class="foc-status" data-foc="status">正在连接 FreeOCS…</div>
+          <div class="foc-hint" data-foc="hint"></div>
+          <div class="foc-actions">
+            <button type="button" class="foc-start" data-foc="start">开始</button>
+            <button type="button" class="foc-stop" data-foc="stop">停止</button>
+          </div>
+          <div class="foc-note">只填答案，不会自动提交/交卷/发布。控制范围仅限本标签页。</div>
+        </div>`;
+      const style = document.createElement("style");
+      style.id = "freeocs-ucampus-panel-style";
+      style.textContent = `
+        #freeocs-ucampus-panel{all:initial;position:fixed;z-index:2147483647;right:14px;bottom:14px;width:286px;box-sizing:border-box;padding:0;border:1px solid #cfd8e6;border-radius:10px;background:#fff;color:#172033;box-shadow:0 8px 30px rgba(20,35,70,.18);font:12px/1.45 system-ui,-apple-system,"Segoe UI","Noto Sans CJK SC",sans-serif;overflow:hidden;pointer-events:auto;}
+        #freeocs-ucampus-panel *{box-sizing:border-box;}
+        #freeocs-ucampus-panel .foc-head{display:flex;align-items:center;gap:6px;padding:8px 10px;background:#f5f7fb;border-bottom:1px solid #e3e8f0;cursor:default;user-select:none;}
+        #freeocs-ucampus-panel .foc-head strong{font-size:12px;color:#172033;white-space:nowrap;}
+        #freeocs-ucampus-panel .foc-dot{width:7px;height:7px;border-radius:50%;background:#98a2b3;flex:0 0 auto;}
+        #freeocs-ucampus-panel .foc-dot.on{background:#16a34a;}
+        #freeocs-ucampus-panel .foc-dot.wait{background:#d97706;}
+        #freeocs-ucampus-panel .foc-dot.bad{background:#dc2626;}
+        #freeocs-ucampus-panel .foc-page{margin-left:auto;color:#8a94a6;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:90px;}
+        #freeocs-ucampus-panel .foc-collapse{border:0;background:transparent;color:#68748a;cursor:pointer;font-size:14px;line-height:1;padding:2px 4px;}
+        #freeocs-ucampus-panel .foc-body{padding:9px 10px 10px;}
+        #freeocs-ucampus-panel.collapsed .foc-body{display:none;}
+        #freeocs-ucampus-panel .foc-status{font-size:12px;color:#172033;min-height:18px;word-break:break-word;}
+        #freeocs-ucampus-panel .foc-hint{margin-top:3px;color:#68748a;font-size:11px;min-height:15px;word-break:break-word;}
+        #freeocs-ucampus-panel .foc-actions{display:flex;gap:6px;margin-top:8px;}
+        #freeocs-ucampus-panel button{font:inherit;border-radius:6px;cursor:pointer;padding:5px 9px;}
+        #freeocs-ucampus-panel .foc-start{border:1px solid #2f6fed;background:#2f6fed;color:#fff;}
+        #freeocs-ucampus-panel .foc-stop{border:1px solid #cfd8e6;background:#fff;color:#172033;}
+        #freeocs-ucampus-panel button:disabled{opacity:.45;cursor:not-allowed;}
+        #freeocs-ucampus-panel .foc-note{margin-top:7px;color:#8a94a6;font-size:10px;line-height:1.4;}
+        @media (prefers-color-scheme: dark){
+          #freeocs-ucampus-panel{background:#1a2130;color:#e7edf7;border-color:#3a4760;}
+          #freeocs-ucampus-panel .foc-head{background:#202838;border-color:#2b3548;}
+          #freeocs-ucampus-panel .foc-head strong,#freeocs-ucampus-panel .foc-status{color:#e7edf7;}
+          #freeocs-ucampus-panel .foc-stop{background:#1a2130;color:#e7edf7;border-color:#3a4760;}
+        }`;
+      document.documentElement.appendChild(style);
+      document.documentElement.appendChild(host);
+      const start = host.querySelector('[data-foc="start"]');
+      const stop = host.querySelector('[data-foc="stop"]');
+      const collapse = host.querySelector('[data-foc="collapse"]');
+      start.addEventListener("click", () => void panelCommand("start", start));
+      stop.addEventListener("click", () => void panelCommand("stop", stop));
+      collapse.addEventListener("click", () => {
+        controlPanelCollapsed = !controlPanelCollapsed;
+        host.classList.toggle("collapsed", controlPanelCollapsed);
+        gmSet("panelCollapsed", controlPanelCollapsed);
+      });
+      host.classList.toggle("collapsed", controlPanelCollapsed);
+      return host;
+    } catch (error) {
+      console.warn("[FreeOCS] control panel failed", error);
+      return null;
+    }
+  }
+
+  async function panelCommand(action, button) {
+    button.disabled = true;
+    const original = button.textContent;
+    button.textContent = action === "start" ? "启动中…" : "停止中…";
+    try {
+      const status = await request(`/api/module/ucampus/${action}`, {});
+      updateControlPanel({
+        active: Boolean(status?.extra?.active ?? status?.active),
+        lease: true,
+        status: status?.message || (action === "start" ? "已请求启动" : "已请求停止"),
+      });
+      window.setTimeout(() => void pollController(), 200);
+    } catch (error) {
+      updateControlPanel({ active: false, lease: false, status: `操作失败：${error.message || error}` });
+    } finally {
+      button.disabled = false;
+      button.textContent = original;
+    }
+  }
+
+  function updateControlPanel(response) {
+    if (window.top !== window.self) return;
+    const host = document.getElementById("freeocs-ucampus-panel");
+    if (!host) return;
+    const active = Boolean(response && response.active);
+    const lease = Boolean(response && response.lease);
+    const dot = host.querySelector('[data-foc="dot"]');
+    const statusEl = host.querySelector('[data-foc="status"]');
+    const hintEl = host.querySelector('[data-foc="hint"]');
+    const start = host.querySelector('[data-foc="start"]');
+    const stop = host.querySelector('[data-foc="stop"]');
+    const pageEl = host.querySelector('[data-foc="page"]');
+    dot.className = `foc-dot ${active ? (lease ? "on" : "wait") : ""}`;
+    if (statusEl) {
+      statusEl.textContent = response?.status || (active ? "运行中" : "未开始");
+    }
+    if (hintEl) {
+      if (active && !lease) hintEl.textContent = "其他标签页正在受控；点“接管本页”切换。";
+      else if (active && lease) hintEl.textContent = "本标签页正在受控。";
+      else if (isCourseDetailPage()) hintEl.textContent = "目录页：开始后自动扫描未完成任务并进入。";
+      else hintEl.textContent = "在目标标签页点击开始，避免操作错页。";
+    }
+    if (pageEl) pageEl.textContent = isCourseDetailPage() ? "目录页" : "学习页";
+    if (start) {
+      start.disabled = active && lease;
+      start.textContent = active && !lease ? "接管本页" : "开始";
+    }
+    if (stop) stop.disabled = !active;
+  }
+
   function hasContentForAutomation() {
     if (isCourseDetailPage()) return courseTasks().length > 0;
     if (isDiscussionPage()) return true;
@@ -2450,6 +2610,7 @@
         completed: runState.completed,
       });
       backendConnected = true;
+      updateControlPanel(response);
       if (response.command) {
         updateRunLog(`收到指令：${response.command.action}`);
         void handleControllerCommand(response.command).catch((error) => {
@@ -2480,6 +2641,14 @@
     }
   }
 
-  void pollController();
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => {
+      createControlPanel();
+      void pollController();
+    }, { once: true });
+  } else {
+    createControlPanel();
+    void pollController();
+  }
   window.setInterval(pollController, 1500);
 })();

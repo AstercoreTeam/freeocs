@@ -112,6 +112,9 @@
         }
       };
       await load();
+      const timer = window.setInterval(() => {
+        if (!document.hidden) void load();
+      }, 4000);
       const handler = (event) => {
         const events = event.detail || [];
         lastEvents = lastEvents.concat(events).slice(-12);
@@ -119,7 +122,12 @@
         if (box) box.innerHTML = eventRows(lastEvents);
       };
       document.addEventListener("focs:events", handler);
-      return { destroy: () => document.removeEventListener("focs:events", handler) };
+      return {
+        destroy: () => {
+          window.clearInterval(timer);
+          document.removeEventListener("focs:events", handler);
+        },
+      };
     },
   });
 })();

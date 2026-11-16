@@ -75,6 +75,7 @@
           <div class="card">
             <h3 class="card-title">Firefox</h3>
             <div class="card-subtitle">Firefox 使用临时加载，浏览器重启后需重新加载。</div>
+            <div class="form-help">如果 Firefox 是 snap 版，扩展目录必须在非隐藏路径（本程序默认 <span class="mono">~/FreeOCS/extensions</span>）；放在 <span class="mono">~/.local/...</span> 会导致 background.js 加载失败。</div>
             ${steps([
               { title: "打开扩展目录", text: "点击下方“打开 Firefox 扩展目录”。", code: data.firefox_dir || "" },
               { title: "进入调试页", text: "在地址栏打开 about:debugging#/runtime/this-firefox。" },

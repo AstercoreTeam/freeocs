@@ -1,6 +1,6 @@
 /* FreeOCS browser bridge - background service worker / event page. */
 const ext = globalThis.browser || globalThis.chrome;
-const VERSION = "0.1.0";
+const VERSION = "0.1.2";
 const CLIENT_HEADER = "X-FreeOCS-Client";
 const CLIENT_VALUE = "browser-bridge";
 const DEFAULT_PORT = 8765;
@@ -8,6 +8,7 @@ const DEFAULT_PORT = 8765;
 let config = { port: DEFAULT_PORT, enabled: true };
 let polling = false;
 let lastError = "";
+let targetTabId = null;
 
 function baseUrl() {
   return `http://127.0.0.1:${config.port}`;
@@ -61,12 +62,32 @@ async function register() {
   }
 }
 
-async function getActiveTab() {
-  const tabs = await ext.tabs.query({ active: true, currentWindow: true });
-  const tab = tabs && tabs[0];
-  if (!tab) throw new Error("没有活动标签页");
-  if (!tab.id) throw new Error("标签页不可用");
-  return tab;
+function isHttpTab(tab) {
+  return Boolean(tab && tab.id && /^https?:/i.test(tab.url || ""));
+}
+
+async function getTargetTab() {
+  if (targetTabId !== null) {
+    try {
+      const existing = await ext.tabs.get(targetTabId);
+      if (isHttpTab(existing)) return existing;
+    } catch (error) {
+      /* target tab closed */
+    }
+    targetTabId = null;
+  }
+  // Look at active tabs in *all* windows, not just the window the extension
+  // background page happens to be associated with.
+  const activeTabs = (await ext.tabs.query({ active: true })).filter(isHttpTab);
+  if (activeTabs.length) {
+    activeTabs.sort((left, right) => (right.lastAccessed || 0) - (left.lastAccessed || 0));
+    targetTabId = activeTabs[0].id;
+    return activeTabs[0];
+  }
+  const allTabs = (await ext.tabs.query({})).filter(isHttpTab);
+  if (!allTabs.length) throw new Error("没有可操作的 http(s) 标签页");
+  targetTabId = allTabs[0].id;
+  return allTabs[0];
 }
 
 async function sendToTab(tabId, message) {
@@ -103,7 +124,7 @@ async function dispatch(task) {
   const action = task.action;
   const args = task.args || {};
   if (action === "dom.call") {
-    const tab = await getActiveTab();
+    const tab = await getTargetTab();
     const result = await sendToTab(tab.id, {
       type: "freeocs:dom",
       method: args.method,
@@ -113,7 +134,7 @@ async function dispatch(task) {
     return result ? result.result : null;
   }
   if (action === "page.info") {
-    const tab = await getActiveTab();
+    const tab = await getTargetTab();
     let info = {};
     try {
       const result = await sendToTab(tab.id, { type: "freeocs:dom", method: "getPageInfo", args: [] });
@@ -121,10 +142,10 @@ async function dispatch(task) {
     } catch (error) {
       info = { error: String(error.message || error) };
     }
-    return Object.assign({ id: tab.id, url: tab.url, title: tab.title, active: true }, info);
+    return Object.assign({ id: tab.id, url: tab.url, title: tab.title, active: Boolean(tab.active), target: true }, info);
   }
   if (action === "page.navigate") {
-    const tab = await getActiveTab();
+    const tab = await getTargetTab();
     if (!args.url || !/^https?:/i.test(args.url)) throw new Error("只允许 http(s) 导航");
     await ext.tabs.update(tab.id, { url: args.url });
     return { ok: true, url: args.url };
@@ -136,6 +157,7 @@ async function dispatch(task) {
       url: tab.url || "",
       title: tab.title || "",
       active: Boolean(tab.active),
+      target: tab.id === targetTabId,
       windowId: tab.windowId,
     }));
   }
@@ -146,13 +168,27 @@ async function dispatch(task) {
     const tab = tabs.find((item) => (item.url || "").includes(pattern) || (item.title || "").includes(pattern));
     if (!tab) throw new Error(`未找到匹配标签页：${pattern}`);
     await ext.tabs.update(tab.id, { active: true });
+    targetTabId = tab.id;
     if (tab.windowId) {
       try { await ext.windows.update(tab.windowId, { focused: true }); } catch (error) { /* ignore */ }
     }
-    return { ok: true, tab: { id: tab.id, url: tab.url, title: tab.title } };
+    return { ok: true, tab: { id: tab.id, url: tab.url, title: tab.title, target: true } };
+  }
+  if (action === "tabs.target") {
+    const tabId = args.tab_id;
+    if (tabId === undefined || tabId === null || tabId === "") throw new Error("缺少 tab_id");
+    let tab;
+    try {
+      tab = await ext.tabs.get(Number(tabId));
+    } catch (error) {
+      throw new Error(`标签页不存在：${tabId}`);
+    }
+    if (!isHttpTab(tab)) throw new Error("目标标签页不是 http(s) 页面");
+    targetTabId = tab.id;
+    return { ok: true, tab: { id: tab.id, url: tab.url, title: tab.title, target: true } };
   }
   if (action === "agent.eval") {
-    const tab = await getActiveTab();
+    const tab = await getTargetTab();
     const result = await sendToTab(tab.id, { type: "freeocs:eval", code: String(args.code || "") });
     if (result && result.error) throw new Error(result.error);
     return result ? result.result : null;
@@ -230,6 +266,7 @@ async function handleMessage(message, sender) {
           "Content-Type": "application/json",
           "X-FreeOCS-Page-URL": pageUrl,
           "X-FreeOCS-Page-Origin": origin,
+          "X-FreeOCS-Tab-Id": sender.tab && sender.tab.id != null ? String(sender.tab.id) : "",
         }),
         body: JSON.stringify(message.body || {}),
       });

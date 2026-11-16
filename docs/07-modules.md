@@ -47,7 +47,7 @@
 FreeOCS 的差异：
 
 1. **不启动 FastAPI**：用 FreeOCS 本地 HTTP 服务 + 模块 `handle_agent_request`。
-2. **不注入悬浮面板**：所有控制在 FreeOCS 应用内；页面 Agent 无 UI。
+2. **主控制在 FreeOCS 应用内；页面右下角保留一个轻量控制面板**：用于把当前标签页绑定为目标、启停和显示状态，避免在错误的标签页上操作。
 3. **不自动提交**：参考脚本会点击“提交”和确认弹窗，必须移除；只填答案并停在提交前。
 4. **能力化**：答题走 `llm.chat`，ASR 走 `media.asr`，TTS 走 `media.tts`，可切换本地/云端。
 5. **配置化**：`config.py`/`.env` 改为设置页 schema；密钥不进代码。
@@ -63,7 +63,7 @@ FreeOCS 的差异：
 │  ├─ 注入本地 bundle（<script src>，无 eval）                             │
 │  └─ postMessage 桥（token 校验；转发模块 API）                            │
 │                                                                          │
-│ page-agent.js（页面主世界，移植自油猴脚本，无悬浮 UI）                    │
+│ page-agent.js（页面主世界，移植自油猴脚本，含轻量控制面板）              │
 │  ├─ __freeocs 桥（请求 Python / 日志 / 页面信息）                        │
 │  ├─ 扫描课程/模块/任务/题目                                               │
 │  ├─ 回填 DOM                                                             │
@@ -287,7 +287,7 @@ runAutomation 循环
 | `dubbing` | `.button-record` / `.record-icon` | **v1 安全模式：停止并提示手动完成**（录音即作答） | — |
 | `roleplay` | “Start role-play” | **v1 安全模式：停止并提示手动完成** | — |
 | `discussion` | 讨论区编辑器 | 填答案，**不点发布**；停止等待手动发布 | `discussion` |
-| `video` | 可见 `<video>` | 播放到结束；有题目时先转写 | — |
+| `video` | 可见 `<video>` | 播放到结束；有题目时先转写；不支持/播放失败时警告并继续下一项 | — |
 | `content` | 无题目 | 找下一个学习目标 | — |
 | `unsupported` | 无匹配 | 上报并停止 | — |
 
