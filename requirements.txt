@@ -1,0 +1,25 @@
+# Copyright 2026 AstercoreTeam
+# Copyright 2026 qincnd <qincnd@qq.com>
+# Copyright 2026 XueZicheng <xuezicheng842@outlook.com>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# FreeOCS core runtime requirements
+# Python 3.12
+
+pywebview[gtk]>=5,<6; sys_platform == "linux"
+pywebview>=5,<6; sys_platform != "linux"
+httpx>=0.27,<1
+
+# Optional local ASR (install when using asr_whisper):
+#   faster-whisper>=1.2,<2
+#   av>=15,<16
+#   system ffmpeg
+#
+# Optional local OCR (ocr_rapid):
+#   rapidocr-onnxruntime>=1.4
+#   pillow>=10
+#   numpy>=1.26
+#
+# Optional system TTS (tts_system):
+#   pyttsx3>=2.90,<3
+#   Linux: espeak-ng

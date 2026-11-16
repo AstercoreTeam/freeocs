@@ -13,7 +13,7 @@
 | ADB | `/usr/bin/adb`（已安装） |
 | uv | 0.10.0（已安装） |
 | 浏览器 | Firefox（已安装）；Chrome/Edge 需自行安装 |
-| 项目目录 | `/home/xzc/桌面/项目/FreeOCS` |
+| 项目目录 | 本仓库根目录 |
 
 **Python 版本策略**：项目固定 **Python 3.12**。系统 3.14 对 `faster-whisper`、`torch`、`onnxruntime` 等可选依赖兼容性不足；用 uv 管理独立解释器，不污染系统。
 
@@ -231,7 +231,7 @@ Windows 交付：
 | `test_capabilities.py` | 提供/依赖解析、多提供者绑定、缺失能力、禁用回退 |
 | `test_settings.py` | 默认值、类型归一化、密码保留/清除、迁移、原子写 |
 | `test_modules.py` | 生命周期、状态 schema、动作、面板元数据、线程停止 |
-| `test_webcat_protocol.py` | 长轮询、结果回传、超时、Origin/头部校验、Agent 下发、租约 |
+| `test_browser_bridge.py` | 长轮询、结果回传、超时、Origin/头部校验、Agent 下发、租约 |
 | `test_adb_parsers.py` | XML fixtures：题型/题干/选项/按钮/提交页 |
 | `test_ucampus_prompts.py` | 提示词构造、JSON/填空/匹配解析 |
 | `test_wisdomtree_reader.py` | 智慧树单选/多选/判断/WebView 占位 |

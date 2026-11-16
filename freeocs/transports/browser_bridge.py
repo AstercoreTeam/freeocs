@@ -16,7 +16,7 @@ from typing import Any
 from ..sdk import BridgeError
 
 
-class WebcatBridge:
+class BrowserBridge:
     def __init__(self, *, poll_timeout: float = 25.0) -> None:
         self._tasks: queue.Queue[dict[str, Any]] = queue.Queue()
         self._pending: dict[str, dict[str, Any]] = {}

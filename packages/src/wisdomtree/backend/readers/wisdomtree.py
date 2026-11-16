@@ -3,7 +3,7 @@
 # Copyright 2026 XueZicheng <xuezicheng842@outlook.com>
 # SPDX-License-Identifier: AGPL-3.0-only
 
-"""com.able.wisdomtree page reader, ported from aiQuestion (MIT)."""
+"""Reader for the com.able.wisdomtree page tree."""
 
 from __future__ import annotations
 

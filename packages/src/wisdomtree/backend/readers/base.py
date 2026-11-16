@@ -5,7 +5,7 @@
 
 """Page data structures for Android uiautomator trees.
 
-Ported from aiQuestion (MIT), original by qincnd / Xue Zicheng.
+Shared page/reader data types.
 """
 
 from __future__ import annotations

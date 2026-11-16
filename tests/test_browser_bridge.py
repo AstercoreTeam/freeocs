@@ -12,11 +12,11 @@ import httpx
 import pytest
 
 from freeocs.sdk import BridgeError
-from freeocs.transports.webcat import WebcatBridge
+from freeocs.transports.browser_bridge import BrowserBridge
 
 
 def test_bridge_roundtrip() -> None:
-    bridge = WebcatBridge()
+    bridge = BrowserBridge()
     bridge.register({"browser": "chrome", "version": "1.0.0"})
     assert bridge.connected is True
     result: list[str] = []
@@ -36,7 +36,7 @@ def test_bridge_roundtrip() -> None:
 
 
 def test_bridge_timeout() -> None:
-    bridge = WebcatBridge()
+    bridge = BrowserBridge()
     with pytest.raises(BridgeError):
         bridge.call("getText", "h1", timeout=0.2)
 

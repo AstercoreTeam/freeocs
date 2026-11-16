@@ -167,7 +167,7 @@
             docs.push(element.contentDocument);
           }
         } catch (_) {
-          // Cross-origin frames run their own userscript instance.
+          // Cross-origin frames run their own page-agent instance.
         }
       }
     }

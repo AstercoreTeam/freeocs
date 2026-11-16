@@ -13,7 +13,7 @@ Firefox / Chromium
 
 FreeOCS 主程序
   freeocs/server.py             本地 HTTP 中继
-  freeocs/transports/webcat.py  扩展长轮询 / 标签页目标
+  freeocs/transports/browser_bridge.py  扩展长轮询 / 标签页目标
   packages/src/ucampus/
     backend/module.py           会话、租约、LLM/ASR/TTS、页面保存
     backend/prompts.py          题型提示词与答案解析
@@ -128,7 +128,7 @@ U校园不是“一页一题”，而是：
 - 页面 Agent：`packages/src/ucampus/web/page-agent.js`
 - Python 模块：`packages/src/ucampus/backend/module.py`
 - 提示词：`packages/src/ucampus/backend/prompts.py`
-- 浏览器中继：`docs/05-webcat-bridge.md`
+- 浏览器中继：`docs/05-browser-bridge.md`
 - 测试：`.venv/bin/python -m pytest -q`
 
 > 本轮新增的阅读上下文、排序只显示答案等改动只在源码中，尚未重新打包。

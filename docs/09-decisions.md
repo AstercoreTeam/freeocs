@@ -4,22 +4,22 @@
 
 ---
 
-## ADR-001：使用 pywebview + hpm-gui 风格 UI
+## ADR-001：使用 pywebview + layui 的桌面 UI
 
 **状态**：accepted（2026-11-16）
 
-**背景**：需要一个 Python 桌面应用，界面可快速迭代，且用户明确要求参考 hpm-gui 的导航形式。
+**背景**：需要一个 Python 桌面应用，界面可快速迭代，并要求界面轻量、可快速迭代。
 
 **决策**：
 
 - 窗口使用 pywebview；Linux 走 GTK/WebKit2，Windows 走 WebView2。
 - 前端不使用 npm/Vite；原生 HTML/CSS/JS + layui。
 - 顶栏 + 左侧导航 + 每页独立 `web/pages/<id>/{index.html,page.js,page.css}`；后端页面注册表驱动导航。
-- 参考 hpm-gui 的 `definePage` / `showPage` / `get_pages` 模式，但增加 hash 路由与模块参数。
+- 页面注册表驱动导航，使用 hash 路由与模块参数。
 
 **后果**：
 
-- 优点：无 Node 构建链；Python 与 JS 边界清晰；复用 hpm-gui 已验证的 pywebview 经验。
+- 优点：无 Node 构建链；Python 与 JS 边界清晰；页面资源独立。
 - 代价：前端组件化能力弱；复杂交互需手写；layui 样式需要定制。
 - 风险：WebKitGTK 与 WebView2 的 CSS/JS 差异；需要双平台验证。
 
@@ -69,11 +69,11 @@
 
 ---
 
-## ADR-004：网页自动化使用 webcat 扩展 + 页面 Agent，不用 Playwright
+## ADR-004：网页自动化使用浏览器扩展 + 页面 Agent，不用 Playwright
 
 **状态**：accepted
 
-**背景**：网页应用需要操作已登录的浏览器。候选：Playwright 启动 Chromium、扩展中继、CDP 连接。用户明确选择 webcat，并要求内置 MV3 + Firefox。
+**背景**：网页应用需要操作已登录的浏览器。候选：Playwright 启动 Chromium、扩展中继、CDP 连接。最终选择内置扩展中继，并要求同时支持 Chromium MV3 与 Firefox。
 
 **决策**：
 
@@ -94,7 +94,7 @@
 
 **状态**：accepted
 
-**背景**：需要本地 HTTP 服务处理扩展长轮询、页面 Agent API、静态资源。参考项目用 FastAPI/Flask，会引入 uvicorn/pydantic 等依赖。
+**背景**：需要本地 HTTP 服务处理扩展长轮询、页面 Agent API、静态资源。使用 FastAPI/Flask 会引入 uvicorn/pydantic 等额外依赖，不符合轻量目标。
 
 **决策**：
 
@@ -115,7 +115,7 @@
 
 **状态**：accepted
 
-**背景**：参考 aiQuestion 已验证 `uiautomator dump` 的文字/坐标精度；用户要求截图 + OCR 兜底。
+**背景**：`uiautomator dump` 能提供较精确的文字与坐标；同时需要截图 + OCR 兜底。
 
 **决策**：
 
@@ -200,7 +200,7 @@
 
 **状态**：accepted（硬约束）
 
-**背景**：参考项目 U校园 会点击“提交/确定”，aiQuestion 已停止在提交页。用户明确要求只填答案。
+**背景**：学习平台通常允许直接提交，但提交是不可逆操作。用户明确要求只填答案。
 
 **决策**：
 
@@ -218,24 +218,24 @@
 
 ---
 
-## ADR-011：U校园采用“页面 Agent + Python 大脑”移植
+## ADR-011：U校园采用“页面 Agent + Python 大脑”
 
 **状态**：accepted
 
-**背景**：参考油猴脚本 2541 行，DOM 选择器/Shadow DOM/iframe/目录状态机复杂；全部重写成 Python + webcat 通用 DOM 调用成本高、回归风险大。
+**背景**：页面包含复杂的 DOM 选择器、Shadow DOM、iframe 与目录状态机；全部重写成 Python + 通用 DOM 调用成本高、回归风险大。
 
 **决策**：
 
-- 保留页面侧逻辑，移植为模块的 `web/page-agent.js`（含轻量控制面板、无 GM API）。
+- 页面侧逻辑放在模块的 `web/page-agent.js`（含轻量控制面板、无 GM API）。
 - Python 模块负责模型、ASR/TTS、提示词/解析、会话状态、租约、日志、设置。
 - 页面 Agent 通过 `__freeocs` 桥调用模块端点；扩展只做注入与传输。
 - 移除所有提交/发布点击，增加 `waiting` 状态。
 
 **后果**：
 
-- 优点：移植风险低；DOM 逻辑靠近页面；Python 侧可复用框架能力。
+- 优点：DOM 逻辑靠近页面；Python 侧可复用框架能力。
 - 代价：模块包含较多 JS；页面脚本调试依赖浏览器；页面 CSP 可能阻止本地 bundle 注入。
-- 缓解：保留原脚本作为参考；逐函数移植；fixture + 手动回归；必要时回退 `scripting.executeScript`。
+- 缓解：fixture + 手动回归；必要时回退 `scripting.executeScript`。
 
 ---
 
@@ -243,7 +243,7 @@
 
 **状态**：accepted
 
-**背景**：参考项目使用 `.env`/config.json；用户要求设置页统一配置。keyring 在 Linux 桌面/打包环境下不稳定。
+**背景**：用户要求设置页统一配置，避免散落的 `.env`/config.json。keyring 在 Linux 桌面/打包环境下不稳定。
 
 **决策**：
 
@@ -307,7 +307,7 @@
 
 **状态**：accepted
 
-**背景**：本地 LLM Key 不能被任意网页滥用；但扩展安装/配对流程越简单越好。参考项目无鉴权。
+**背景**：本地 LLM Key 不能被任意网页滥用；但扩展安装/配对流程越简单越好。早期方案没有鉴权。
 
 **决策**：
 

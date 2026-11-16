@@ -37,12 +37,12 @@ TTS 能力
 
 ## KokoClone 环境准备
 
-参考目录：`/home/xzc/桌面/项目/u校园/kokoclone`
+准备一个 KokoClone 项目目录（含 `core/cloner.py`、`model/`、`voice/`）。
 
 需要一个 Linux 环境（示例）：
 
 ```bash
-cd /home/xzc/桌面/项目/u校园/kokoclone
+cd <KokoClone目录>
 uv venv .venv-linux
 uv pip install --python .venv-linux/bin/python -r requirements.txt
 ```
@@ -50,8 +50,8 @@ uv pip install --python .venv-linux/bin/python -r requirements.txt
 然后在设置中选择：
 
 ```text
-KokoClone 目录 = /home/xzc/桌面/项目/u校园/kokoclone
-KokoClone Python = /home/xzc/桌面/项目/u校园/kokoclone/.venv-linux/bin/python
+KokoClone 目录 = <KokoClone目录>
+KokoClone Python = <KokoClone目录>/.venv-linux/bin/python
 参考音频 = 你选择的 3–10 秒人声.wav
 ```
 

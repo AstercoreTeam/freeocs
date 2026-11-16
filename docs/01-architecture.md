@@ -39,7 +39,7 @@ FreeOCS v1 要交付一个能在 Linux 桌面上直接运行的 pywebview 应用
         │                       │                       │
 ┌───────▼────────┐     ┌────────▼─────────┐     ┌───────▼──────────────┐
 │ packages       │     │ Local HTTP Server│     │ transports           │
-│ plugin/module  │     │ 127.0.0.1:8765   │     │  adb.py / webcat.py  │
+│ plugin/module  │     │ 127.0.0.1:8765   │     │  adb.py / browser_bridge.py  │
 │ (Python zip)   │     │ 扩展中继/页面Agent│     │                      │
 └───────┬────────┘     └────────┬─────────┘     └───────┬──────────────┘
         │                       │                       │
@@ -100,7 +100,7 @@ FreeOCS/
 │   ├── logging_setup.py
 │   ├── transports/
 │   │   ├── adb.py              # AdbManager/AdbDevice
-│   │   └── webcat.py           # 扩展队列、长轮询、页面 Agent 注册
+│   │   └── browser_bridge.py           # 扩展队列、长轮询、页面 Agent 注册
 │   └── ui/
 │       └── pages.py            # 页面注册表（供前端导航）
 ├── web/                        # 前端（无需构建）
@@ -112,7 +112,7 @@ FreeOCS/
 │   ├── js/settings.js          # schema 渲染
 │   ├── js/module.js            # 模块详情页
 │   ├── i18n/{zh-CN,en-US}.json
-│   ├── vendor/layui/           # 从 hpm-gui 复用（MIT）
+│   ├── vendor/layui/           # layui（MIT）
 │   └── pages/
 │       ├── home/{index.html,page.js,page.css}
 │       ├── apps/...
@@ -146,7 +146,7 @@ FreeOCS/
     ├── test_packages.py
     ├── test_capabilities.py
     ├── test_settings.py
-    ├── test_webcat_protocol.py
+    ├── test_browser_bridge.py
     ├── test_adb_parsers.py
     ├── fixtures/
     └── modules/                # 模块解析/提示词单测
@@ -258,10 +258,10 @@ FreeOCS/
 | `/packages/<id>/<version>/<path>` | 包内 `web/` 静态资源 | pywebview 前端、扩展 |
 | `/extension/*` | 扩展长轮询、结果、Agent 配置、状态 | 浏览器扩展后台 |
 | `/api/module/<id>/<method>` | 页面 Agent 调用模块方法 | 扩展后台代理 |
-| `/call` | 兼容 webcat 的手动调用入口（调试） | 本机 curl |
+| `/call` | 兼容旧式手动调用入口（调试） | 本机 curl |
 | `/events` | 可选：调试用事件快照 | 本机 |
 
-安全策略见 `05-webcat-bridge.md` 与 `09-decisions.md`：
+安全策略见 `05-browser-bridge.md` 与 `09-decisions.md`：
 
 - 只绑定回环地址。
 - `/api/module/*` 要求请求来自扩展后台（`X-FreeOCS-Client` + Origin 校验）或本机回环；浏览器页面直接请求会被拒绝。

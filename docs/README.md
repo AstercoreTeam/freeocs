@@ -15,14 +15,7 @@ FreeOCS（Free Open Course Study）是一个本地优先、插件化的学习助
 - 设置页由框架统一渲染，插件和模块可注册自己的设置项。
 - **绝不自动点击“提交/交卷/发布”等不可逆操作**，只填答案并提示用户手动完成。
 
-参考项目：
-
-| 项目 | 可复用的部分 |
-| --- | --- |
-| `/home/xzc/桌面/项目/u校园` | U校园页面扫描、题型识别、答案回填、ASR/TTS、自动学习状态机 |
-| `/home/xzc/桌面/项目/aiQuestion` | ADB `uiautomator dump`、控件树解析、Function Calling 答题 Agent |
-| `/home/xzc/桌面/项目/webcat` | 浏览器扩展 + 本地长轮询中继、通用 DOM 操作协议 |
-| `/home/xzc/桌面/项目/hpm-gui` | pywebview + layui 的顶栏/侧边栏/页面注册/设置页 UI 形态 |
+本项目从零实现自己的框架、浏览器中继和平台模块，不依赖其它学习助手项目的代码。
 
 ## 2. 文档索引
 
@@ -32,7 +25,7 @@ FreeOCS（Free Open Course Study）是一个本地优先、插件化的学习助
 | [02-package-format.md](02-package-format.md) | 插件/模块 zip 包格式、manifest、安装与加载 | 插件/模块开发者 |
 | [03-capability-sdk.md](03-capability-sdk.md) | 能力注册、SDK 接口、模块生命周期、设置/事件 | 插件/模块开发者 |
 | [04-ui-design.md](04-ui-design.md) | 界面导航、页面结构、模块面板注入、设置页 schema | 前端/UI |
-| [05-webcat-bridge.md](05-webcat-bridge.md) | 浏览器扩展、中继协议、页面 Agent 注入、安装引导 | 网页模块开发者 |
+| [05-browser-bridge.md](05-browser-bridge.md) | 浏览器扩展、中继协议、页面 Agent 注入、安装引导 | 网页模块开发者 |
 | [06-android.md](06-android.md) | ADB 传输层、uiautomator、OCR 兜底、点击策略 | 手机模块开发者 |
 | [mods/](mods/README.md) | 按平台拆分的实际实现：U校园页面/题型/流程，智慧树 ADB 流程 | 模块开发者 |
 | [plugins/](plugins/README.md) | 按插件拆分的实现：LLM、ASR、OCR、TTS/KokoClone | 插件开发者 |
@@ -48,10 +41,10 @@ FreeOCS（Free Open Course Study）是一个本地优先、插件化的学习助
 | 主题 | 决策 |
 | --- | --- |
 | 平台 | Linux 优先，Windows 保留兼容层，条件允许时同步支持 |
-| UI | pywebview；导航与页面组织参考 hpm-gui（顶栏 + 左侧导航 + 每页独立资源 + layui） |
+| UI | pywebview + layui；顶栏 + 左侧导航 + 每页独立资源 |
 | 模块/插件分发 | 统一为独立构建的 zip 包；包内是 Python 包，主程序内加载 |
 | 依赖安装 | 包内声明 Python 依赖，安装时列出并**经用户确认**后装入主程序环境 |
-| 网页自动化 | 使用 webcat 方案：内置浏览器扩展 + 本地中继；扩展同时兼容 Chromium MV3 与 Firefox |
+| 网页自动化 | 使用内置浏览器扩展方案：内置浏览器扩展 + 本地中继；扩展同时兼容 Chromium MV3 与 Firefox |
 | 手机自动化 | `uiautomator dump + adb input`，截图 + OCR 作为兜底 |
 | 能力模型 | 模块声明 `requires`，插件声明 `provides`；框架提供 ADB、浏览器中继等基础能力 |
 | 答题 | 框架只提供“题干 + 选项 → 选项”的选择题辅助能力；复杂题型由模块自己调用大模型 |
@@ -94,7 +87,7 @@ FreeOCS（Free Open Course Study）是一个本地优先、插件化的学习助
 
 在进入 M1 编码前，建议重点确认以下 5 点：
 
-1. **U校园“安全模式”边界**：v1 对 `dubbing`（朗读评分）、`roleplay`（角色扮演）、讨论区“发布”均停在提交前，只填/准备内容，不自动完成评分或发布。这是对参考项目“全自动”的主动收窄，是否符合预期？
+1. **U校园“安全模式”边界**：v1 对 `dubbing`（朗读评分）、`roleplay`（角色扮演）、讨论区“发布”均停在提交前，只填/准备内容，不自动完成评分或发布。这是对“全自动”的主动收窄，是否符合预期？
 2. **网页自动化形态**：模块携带页面 Agent（JS），由扩展注入；扩展保持通用。相比“全部用 Python + 通用 DOM 调用”，这种方案移植成本低，但模块会包含较多 JS。
 3. **包运行形态**：Python 包在主程序内加载，无进程隔离；安装依赖需用户确认；安装/更新后重启生效。
 4. **密钥存储**：v1 以 `0600` 权限的 JSON 明文保存 API Key，不接系统 keyring。

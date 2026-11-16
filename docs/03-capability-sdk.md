@@ -29,7 +29,7 @@
 | `media.asr` | 媒体能力 | `asr_whisper`（本地）、`asr_openai`（云端） | `transcribe(...)` |
 | `media.ocr` | 媒体能力 | `ocr_rapid`（本地）、可选云端 | `extract(...)` |
 | `media.tts` | 媒体能力 | `tts_system`（本地）、`tts_openai`（云端） | `synthesize(...)` |
-| `web.bridge` | 核心能力 | 框架内置（webcat 中继） | `call/page_info/navigate/...` |
+| `web.bridge` | 核心能力 | 框架内置（浏览器中继） | `call/page_info/navigate/...` |
 | `android.adb` | 核心能力 | 框架内置（adb CLI） | `dump_hierarchy/tap/screenshot/...` |
 
 说明：
@@ -260,7 +260,7 @@ class WebBridge(Protocol):
         """显式绑定目标标签页，不要求它是活动窗口。"""
 ```
 
-通用 DOM 方法见 `05-webcat-bridge.md`。模块通常不直接使用 `call` 完成整站自动化，而是通过页面 Agent；`call` 用于轻量检查/导航。
+通用 DOM 方法见 `05-browser-bridge.md`。模块通常不直接使用 `call` 完成整站自动化，而是通过页面 Agent；`call` 用于轻量检查/导航。
 
 ### 4.7 `android.adb`
 

@@ -2,7 +2,7 @@
 
 ## 1. 参考与原则
 
-界面沿用 `/home/xzc/桌面/项目/hpm-gui` 的组织方式：
+界面采用顶栏 + 左侧导航 + 每页独立资源的组织方式：
 
 - pywebview 单窗口。
 - 顶部栏放品牌、全局状态、主题/设置。
@@ -378,7 +378,7 @@ Firefox 步骤：
 
 ## 10. 前端 API（pywebview）
 
-`pywebview.api` 暴露扁平方法（参考 hpm-gui 的平铺方式）：
+`pywebview.api` 暴露扁平方法：
 
 ### 启动/导航
 

@@ -241,7 +241,7 @@ reader = next((r for r in readers if r.can_handle(root)), None)
 
 ## 5. 答题 Agent
 
-智慧树使用 Function Calling Agent（移植 `aiQuestion`）：
+智慧树使用 Function Calling Agent：
 
 ### 5.1 工具
 

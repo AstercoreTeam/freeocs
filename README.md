@@ -64,6 +64,34 @@ PLAYWRIGHT_BROWSERS_PATH=$PWD/.playwright \
   FREEOCS_PACKAGES=dist .venv/bin/python scripts/e2e_ucampus.py
 ```
 
+## 致谢
+
+本项目的开发离不开以下优秀开源项目和社区的贡献，在此我们表示由衷的感谢。
+
+| 项目 | 用途 | 开源协议 |
+| :--- | :--- | :--- |
+| pywebview | 桌面窗口与 Python/JS 桥 | BSD-3-Clause |
+| GTK / WebKitGTK | Linux 桌面渲染 | LGPL-2.1-or-later |
+| PyGObject | GTK 的 Python 绑定 | LGPL-2.1-or-later |
+| layui | 前端基础样式与组件 | MIT |
+| httpx | HTTP 客户端 | BSD-3-Clause |
+| Ruff | Python lint / format | MIT |
+| pytest | 测试框架 | MIT |
+| PyInstaller | 桌面打包 | GPL-2.0-or-later WITH Bootloader-exception |
+| Playwright | 浏览器端到端测试 | Apache-2.0 |
+| faster-whisper | 本地语音转写 | MIT |
+| PyAV | 音视频容器解码 | BSD-3-Clause |
+| FFmpeg | 音视频转码/标准化 | LGPL-2.1-or-later 或 GPL-2.0-or-later（取决于构建） |
+| RapidOCR | 本地 OCR | Apache-2.0 |
+| ONNX Runtime | OCR/模型推理运行时 | MIT |
+| Pillow | 图像处理 | HPND |
+| NumPy | 数值计算 | BSD-3-Clause |
+| pyttsx3 | 系统语音合成 | MPL-2.0 |
+| KokoClone / Kokoro / Kanade | 本地克隆语音引擎 | Apache-2.0 |
+| PyTorch | 克隆语音推理运行时 | BSD-3-Clause |
+
+感谢以上项目及其贡献者。各依赖的完整许可文本请查看对应上游项目。
+
 ---
 
 ## License / 许可

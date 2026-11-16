@@ -22,7 +22,7 @@ from .events import EventBus
 from .modules import ModuleHost
 from .packages import PackageManager
 from .sdk import BridgeError, FreeOCSError
-from .transports.webcat import WebcatBridge
+from .transports.browser_bridge import BrowserBridge
 
 logger = logging.getLogger("freeocs.server")
 
@@ -49,13 +49,13 @@ class LocalServer:
         packages: PackageManager | None = None,
         modules: ModuleHost | None = None,
         events: EventBus | None = None,
-        bridge: WebcatBridge | None = None,
+        bridge: BrowserBridge | None = None,
     ) -> None:
         self.requested_port = 8765 if port is None else int(port)
         self.packages = packages
         self.modules = modules
         self.events = events or EventBus()
-        self.bridge = bridge or WebcatBridge()
+        self.bridge = bridge or BrowserBridge()
         self._server: LocalHTTPServer | None = None
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()

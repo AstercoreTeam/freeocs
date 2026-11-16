@@ -15,7 +15,7 @@ from freeocs.events import EventBus
 from freeocs.modules import ModuleHost
 from freeocs.packages import PackageManager
 from freeocs.sdk import ChatResult
-from freeocs.transports.webcat import WebcatBridge
+from freeocs.transports.browser_bridge import BrowserBridge
 
 from .helpers import ROOT, make_paths
 
@@ -67,7 +67,7 @@ def ucampus_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     settings = SettingsStore(paths.settings_file)
     events = EventBus()
     registry = CapabilityRegistry()
-    web = WebcatBridge()
+    web = BrowserBridge()
     registry.register_core("web.bridge", web)
     manager = PackageManager(paths, settings, events, registry, web=web)
     manager.load_all()

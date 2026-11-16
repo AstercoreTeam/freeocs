@@ -24,7 +24,7 @@ from .packages import PackageManager
 from .paths import AppPaths, build_paths
 from .server import LocalServer
 from .transports.adb import AdbManager
-from .transports.webcat import WebcatBridge
+from .transports.browser_bridge import BrowserBridge
 from .usage import UsageStore
 
 logger = logging.getLogger("freeocs.app")
@@ -50,12 +50,12 @@ class Application:
         self.registry.set_usage(self.usage)
         self.registry.apply_bindings(self.settings.capability_bindings())
         self.adb = AdbManager(self.settings)
-        self.web = WebcatBridge()
+        self.web = BrowserBridge()
         self.registry.register_core(
             "android.adb", self.adb, title="ADB", description="Android 调试桥"
         )
         self.registry.register_core(
-            "web.bridge", self.web, title="浏览器中继", description="webcat 扩展中继"
+            "web.bridge", self.web, title="浏览器中继", description="浏览器扩展中继"
         )
 
         configured_port = (
