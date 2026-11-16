@@ -3,7 +3,7 @@
   "api_version": 1,
   "id": "asr_openai",
   "name": "云端语音转写（OpenAI 兼容）",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "plugin",
   "description": "调用 OpenAI 兼容 /audio/transcriptions 转写音频。",
   "author": "FreeOCS",

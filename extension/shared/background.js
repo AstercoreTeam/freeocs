@@ -7,7 +7,7 @@
 
 /* FreeOCS browser bridge - background service worker / event page. */
 const ext = globalThis.browser || globalThis.chrome;
-const VERSION = "0.1.2";
+const VERSION = "0.2.0";
 const CLIENT_HEADER = "X-FreeOCS-Client";
 const CLIENT_VALUE = "browser-bridge";
 const DEFAULT_PORT = 8765;

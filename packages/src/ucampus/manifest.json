@@ -3,7 +3,7 @@
   "api_version": 1,
   "id": "ucampus",
   "name": "U校园",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "U校园网页自动学习：识别题目、听力转写、作答与回填；遇到提交/发布时停止。",
   "author": "FreeOCS",
@@ -22,7 +22,7 @@
   ],
   "provides": {},
   "dependencies": [],
-  "min_app_version": "0.1.0",
+  "min_app_version": "0.2.0",
   "web": {
     "allowed_hosts": [
       "*.unipus.cn",

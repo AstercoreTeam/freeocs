@@ -3,7 +3,7 @@
   "api_version": 1,
   "id": "ocr_rapid",
   "name": "本地 OCR（RapidOCR）",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "plugin",
   "description": "使用 RapidOCR 识别截图文字与坐标；可回退到 tesseract。",
   "author": "FreeOCS",

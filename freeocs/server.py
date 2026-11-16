@@ -204,7 +204,7 @@ class LocalServer:
     else slot.reject(new Error(data.error || "本地服务请求失败"));
   }});
   const bridge = {{
-    version: "0.1.0",
+    version: "{__version__}",
     baseUrl: BASE,
     request(path, options) {{
       const opts = options || {{}};

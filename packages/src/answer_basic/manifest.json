@@ -3,7 +3,7 @@
   "api_version": 1,
   "id": "answer_basic",
   "name": "基础选择题答题",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "plugin",
   "description": "基于大模型的选择题辅助：题干 + 选项 → 一个选项。",
   "author": "FreeOCS",

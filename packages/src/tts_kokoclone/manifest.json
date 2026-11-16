@@ -3,7 +3,7 @@
   "api_version": 1,
   "id": "tts_kokoclone",
   "name": "本地克隆语音（KokoClone）",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "plugin",
   "description": "使用 KokoClone/Kokoro + Kanade，把用户提供的参考音频克隆为朗读声音。",
   "author": "FreeOCS",

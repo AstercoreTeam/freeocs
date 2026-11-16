@@ -74,7 +74,7 @@ POST /extension/register
 响应：
 
 ```json
-{ "ok": true, "server_version": "0.1.0", "poll_timeout": 25 }
+{ "ok": true, "server_version": "0.2.0", "poll_timeout": 25 }
 ```
 
 服务端记录 `last_seen`、浏览器、版本、扩展 ID。每 30 秒可再发一次；长轮询本身也可视为心跳。
@@ -310,7 +310,7 @@ U校园模块会在开始前绑定一个匹配的标签页；页面内控制面�
 
 ```js
 const bridge = {
-  version: "0.1.0",
+  version: "0.2.0",
   baseUrl: "http://127.0.0.1:8765",
 
   // 调用模块 API；自动带 page URL/Origin

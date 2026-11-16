@@ -85,7 +85,7 @@ zip 根目录直接放 `manifest.json`，不要多套一层目录。
   "optional_requires": ["answer.choice"],
   "provides": {},
   "dependencies": [],
-  "min_app_version": "0.1.0",
+  "min_app_version": "0.2.0",
   "web": {
     "allowed_hosts": ["*.unipus.cn", "unipus.cn"]
   },

@@ -3,7 +3,7 @@
   "api_version": 1,
   "id": "asr_whisper",
   "name": "本地语音转写（faster-whisper）",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "plugin",
   "description": "使用本地 faster-whisper 模型转写音频，离线可用。",
   "author": "FreeOCS",

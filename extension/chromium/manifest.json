@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "FreeOCS Browser Bridge",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "FreeOCS 本地学习助手的浏览器中继（仅连接 127.0.0.1）。",
   "minimum_chrome_version": "109",
   "permissions": [

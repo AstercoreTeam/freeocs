@@ -3,7 +3,7 @@
   "api_version": 1,
   "id": "wisdomtree",
   "name": "智慧树",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "智慧树手机答题：ADB 读取控件树，AI 选择答案；遇到交卷页停止。",
   "author": "FreeOCS",
@@ -19,7 +19,7 @@
   ],
   "provides": {},
   "dependencies": [],
-  "min_app_version": "0.1.0",
+  "min_app_version": "0.2.0",
   "panels": [
     {
       "id": "wisdomtree_console",
