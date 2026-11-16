@@ -37,10 +37,11 @@ FreeOCS（Free Open Course Study）是一个本地优先、插件化的学习助
 | [07-modules.md](07-modules.md) | U校园、智慧树模块的移植方案与验收标准 | 模块开发者 |
 | [mods/](mods/README.md) | 按平台拆分的实际实现：U校园页面/题型/流程，智慧树 ADB 流程 | 模块开发者 |
 | [08-development.md](08-development.md) | 环境、运行、构建、打包、测试、里程碑 | 开发者 |
-| [10-token-usage.md](10-token-usage.md) | Token 统计、百万 token 单价、消费限额、AI 兜底确认 | 开发者/用户 |
+| [10-token-usage.md](10-token-usage.md) | Token 统计、缓存命中/未命中/输出单价、消费限额、AI 兜底确认 | 开发者/用户 |
+| [11-voice-clone.md](11-voice-clone.md) | KokoClone 本地克隆语音、参考音频设置、独立环境 | 开发者/用户 |
 | [09-decisions.md](09-decisions.md) | 关键架构决策记录（ADR） | 所有人 |
 
-建议阅读顺序：`README → 01 → 02 → 03 → 04 → 05/06 → 07 → mods → 08 → 10`。
+建议阅读顺序：`README → 01 → 02 → 03 → 04 → 05/06 → 07 → mods → 08 → 10 → 11`。
 
 ## 3. 已确认的产品决策
 

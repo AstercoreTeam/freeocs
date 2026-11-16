@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "api_version": 1,
+  "id": "tts_kokoclone",
+  "name": "本地克隆语音（KokoClone）",
+  "version": "0.1.0",
+  "type": "plugin",
+  "description": "使用 KokoClone/Kokoro + Kanade，把用户提供的参考音频克隆为朗读声音。",
+  "author": "FreeOCS",
+  "license": "MIT",
+  "entry": "main:setup",
+  "platform": "any",
+  "requires": [],
+  "provides": {
+    "media.tts": {
+      "version": 1,
+      "title": "KokoClone 克隆语音",
+      "description": "参考音频零样本克隆，本地离线合成"
+    }
+  },
+  "dependencies": [],
+  "settings": [
+    {
+      "id": "tts_kokoclone",
+      "title": "克隆语音（KokoClone）",
+      "order": 212,
+      "fields": [
+        {
+          "key": "kokoro_model",
+          "type": "path",
+          "mode": "file",
+          "label": "Kokoro ONNX 模型",
+          "default": "",
+          "help": "选择 kokoro.onnx（或中文 kokoro-v1.1-zh.onnx）。留空则使用 KokoClone 目录下的 model/kokoro.onnx。"
+        },
+        {
+          "key": "voices_file",
+          "type": "path",
+          "mode": "file",
+          "label": "Kokoro voices 文件",
+          "default": "",
+          "help": "选择 voices-v1.0.bin；中文可用 voices-v1.1-zh.bin。留空则使用 KokoClone 目录下的 voices 文件。"
+        },
+        {
+          "key": "kanade_config",
+          "type": "path",
+          "mode": "file",
+          "label": "Kanade config.yaml",
+          "default": "",
+          "help": "选择 Kanade 模型的 config.yaml。"
+        },
+        {
+          "key": "kanade_weights",
+          "type": "path",
+          "mode": "file",
+          "label": "Kanade model.safetensors",
+          "default": "",
+          "help": "选择 Kanade 模型的 model.safetensors。"
+        },
+        {
+          "key": "vocoder_dir",
+          "type": "path",
+          "mode": "dir",
+          "label": "Vocoder 模型目录（可选）",
+          "default": "",
+          "help": "选择本地 Vocos 模型目录；留空使用 KokoClone 默认下载。"
+        },
+        {
+          "key": "vocab_config",
+          "type": "path",
+          "mode": "file",
+          "label": "Kokoro vocab config（可选）",
+          "default": "",
+          "help": "中文/日文模型可指定 config.json；留空自动查找。"
+        },
+        {
+          "key": "project_dir",
+          "type": "path",
+          "mode": "dir",
+          "label": "KokoClone 目录",
+          "default": "",
+          "help": "包含 core/cloner.py、model/ 和 voice/ 的 KokoClone 项目目录。"
+        },
+        {
+          "key": "python_path",
+          "type": "path",
+          "mode": "file",
+          "label": "KokoClone Python",
+          "default": "",
+          "help": "安装了 torch、kokoro-onnx、kanade-tokenizer 的 Python。留空尝试 <项目>/.venv/bin/python（Windows 为 Scripts/python.exe）。"
+        },
+        {
+          "key": "reference_audio",
+          "type": "path",
+          "mode": "file",
+          "label": "参考音频（用于克隆）",
+          "default": "",
+          "required": true,
+          "help": "放一段 3-10 秒、单人、无背景音乐的人声 WAV/MP3；合成时用这段声音克隆。"
+        },
+        {
+          "key": "language",
+          "type": "select",
+          "label": "语言",
+          "default": "en",
+          "options": [
+            {
+              "value": "en",
+              "label": "English"
+            },
+            {
+              "value": "zh",
+              "label": "中文"
+            },
+            {
+              "value": "ja",
+              "label": "日本語"
+            },
+            {
+              "value": "fr",
+              "label": "Français"
+            },
+            {
+              "value": "hi",
+              "label": "हिन्दी"
+            },
+            {
+              "value": "it",
+              "label": "Italiano"
+            },
+            {
+              "value": "pt",
+              "label": "Português"
+            },
+            {
+              "value": "es",
+              "label": "Español"
+            }
+          ]
+        },
+        {
+          "key": "timeout",
+          "type": "number",
+          "label": "合成超时（秒）",
+          "default": 600,
+          "min": 30,
+          "max": 3600,
+          "step": 10
+        }
+      ]
+    }
+  ]
+}
