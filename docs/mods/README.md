@@ -56,3 +56,13 @@
 - 用户手动提交后，才允许进入下一模块并继续自动作答。
 - 不绕过验证码、风控或登录限制。
 - 保存用于开发的不支持页面时，注意个人信息脱敏。
+
+---
+
+## License / 许可
+
+Copyright (C) 2026 qincnd <qincnd@qq.com>, XueZicheng <xuezicheng842@outlook.com>, AstercoreTeam.
+
+This project is licensed under the **GNU Affero General Public License v3.0 only** (`AGPL-3.0-only`).
+See [https://spdx.org/licenses/AGPL-3.0-only.html](https://spdx.org/licenses/AGPL-3.0-only.html).
+

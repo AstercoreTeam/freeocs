@@ -1,4 +1,11 @@
 <!DOCTYPE html>
+<!--
+ Copyright 2026 AstercoreTeam
+ Copyright 2026 qincnd <qincnd@qq.com>
+ Copyright 2026 XueZicheng <xuezicheng842@outlook.com>
+ SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 <html lang="zh-CN" data-theme="light">
 <head>
   <meta charset="UTF-8">
@@ -33,6 +40,35 @@
     <main class="focs-main" id="page-content" role="main">
       <div class="page-loading"><span class="spinner"></span> 正在加载…</div>
     </main>
+  </div>
+
+  <footer class="focs-footer">
+    Copyright 2026 AstercoreTeam GNU Affero General Public License v3.0 only
+  </footer>
+</div>
+
+<div class="license-gate" id="license-gate" hidden>
+  <div class="license-card" role="dialog" aria-modal="true" aria-labelledby="license-title">
+    <h2 id="license-title">欢迎使用 FreeOCS</h2>
+    <p>欢迎使用FreeOCS,本软件旨在让学生自主分配学习时间，请勿因为本软件荒废学业，进入软件视为您同意AGPLv3协议。</p>
+    <p class="license-link-row">
+      <a href="https://spdx.org/licenses/AGPL-3.0-only.html" target="_blank" rel="noreferrer">
+        GNU Affero General Public License v3.0 only（AGPL-3.0-only）
+      </a>
+    </p>
+    <label class="license-agree">
+      <input type="checkbox" id="license-check" autocomplete="off">
+      <span>我已阅读并同意 AGPL-3.0-only 许可协议</span>
+    </label>
+    <div class="license-actions">
+      <button class="btn" type="button" id="license-decline">不同意并退出</button>
+      <button class="btn btn-primary" type="button" id="license-accept" disabled>同意并继续</button>
+    </div>
+    <p class="license-copy">
+      Copyright 2026 AstercoreTeam<br>
+      qincnd &lt;qincnd@qq.com&gt;<br>
+      XueZicheng &lt;xuezicheng842@outlook.com&gt;
+    </p>
   </div>
 </div>
 

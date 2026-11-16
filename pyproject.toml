@@ -1,3 +1,8 @@
+# Copyright 2026 AstercoreTeam
+# Copyright 2026 qincnd <qincnd@qq.com>
+# Copyright 2026 XueZicheng <xuezicheng842@outlook.com>
+# SPDX-License-Identifier: AGPL-3.0-only
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
@@ -8,7 +13,11 @@ version = "0.1.0"
 description = "FreeOCS - local-first, plugin-based study assistant desktop app"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-license = { text = "MIT" }
+license = { text = "AGPL-3.0-only" }
+authors = [
+  { name = "qincnd", email = "qincnd@qq.com" },
+  { name = "XueZicheng", email = "xuezicheng842@outlook.com" },
+]
 dependencies = [
   "pywebview[gtk]>=5,<6; sys_platform == 'linux'",
   "pywebview>=5,<6; sys_platform != 'linux'",

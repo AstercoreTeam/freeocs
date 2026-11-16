@@ -1,3 +1,8 @@
+# Copyright 2026 AstercoreTeam
+# Copyright 2026 qincnd <qincnd@qq.com>
+# Copyright 2026 XueZicheng <xuezicheng842@outlook.com>
+# SPDX-License-Identifier: AGPL-3.0-only
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -12,7 +17,7 @@ def test_defaults_and_sections(tmp_path: Path) -> None:
     store = SettingsStore(tmp_path / "settings.json")
     assert store.core_get("llm", "model") == "deepseek-chat"
     ids = [section["id"] for section in store.schema()]
-    assert ids[:4] == ["ui", "llm", "usage", "bridge"]
+    assert ids[:5] == ["legal", "ui", "llm", "usage", "bridge"]
     assert "android" in ids
     assert store.core_get("usage", "price_per_million") == 0.0
     assert store.core_get("usage", "cache_hit_price_per_million") == 0.0

@@ -1,3 +1,8 @@
+# Copyright 2026 AstercoreTeam
+# Copyright 2026 qincnd <qincnd@qq.com>
+# Copyright 2026 XueZicheng <xuezicheng842@outlook.com>
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """End-to-end U校园 test with a real Chromium extension and a mock LLM.
 
 This is a developer test, not part of the normal test suite.  It requires

@@ -7,7 +7,7 @@
   "type": "module",
   "description": "U校园网页自动学习：识别题目、听力转写、作答与回填；遇到提交/发布时停止。",
   "author": "FreeOCS",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "entry": "main:setup",
   "platform": "web",
   "requires": [

@@ -1,3 +1,8 @@
+# Copyright 2026 AstercoreTeam
+# Copyright 2026 qincnd <qincnd@qq.com>
+# Copyright 2026 XueZicheng <xuezicheng842@outlook.com>
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Settings schema, validation and atomic JSON persistence."""
 
 from __future__ import annotations
@@ -61,6 +66,17 @@ def field(
 
 
 CORE_SECTIONS: list[dict[str, Any]] = [
+    {
+        "id": "legal",
+        "title": "许可协议",
+        "description": "AGPL-3.0-only 许可与版权信息。",
+        "group": "core",
+        "order": 5,
+        "fields": [
+            field("accepted", "已同意 AGPL-3.0-only", "boolean", False, advanced=True),
+            field("accepted_at", "同意时间", "text", "", advanced=True),
+        ],
+    },
     {
         "id": "ui",
         "title": "界面",

@@ -1,3 +1,8 @@
+# Copyright 2026 AstercoreTeam
+# Copyright 2026 qincnd <qincnd@qq.com>
+# Copyright 2026 XueZicheng <xuezicheng842@outlook.com>
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Local KokoClone TTS provider.
 
 KokoClone keeps torch / Kokoro / Kanade in a separate environment.  FreeOCS only

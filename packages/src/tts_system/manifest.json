@@ -7,7 +7,7 @@
   "type": "plugin",
   "description": "使用操作系统自带 TTS 引擎生成 WAV，离线可用。",
   "author": "FreeOCS",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "entry": "main:setup",
   "platform": "any",
   "requires": [],
@@ -18,7 +18,9 @@
       "description": "pyttsx3 / SAPI5 / espeak-ng"
     }
   },
-  "dependencies": ["pyttsx3>=2.90,<3"],
+  "dependencies": [
+    "pyttsx3>=2.90,<3"
+  ],
   "settings": [
     {
       "id": "tts_system",

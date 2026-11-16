@@ -1,3 +1,10 @@
+/**
+ * Copyright 2026 AstercoreTeam
+ * Copyright 2026 qincnd <qincnd@qq.com>
+ * Copyright 2026 XueZicheng <xuezicheng842@outlook.com>
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 .wt-panel { display: flex; flex-direction: column; }
 .wt-message { font-size: 14px; color: var(--text); }
 .wt-safety {

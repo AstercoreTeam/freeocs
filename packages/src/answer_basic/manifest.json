@@ -7,10 +7,12 @@
   "type": "plugin",
   "description": "基于大模型的选择题辅助：题干 + 选项 → 一个选项。",
   "author": "FreeOCS",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "entry": "main:setup",
   "platform": "any",
-  "requires": ["llm.chat"],
+  "requires": [
+    "llm.chat"
+  ],
   "provides": {
     "answer.choice": {
       "version": 1,

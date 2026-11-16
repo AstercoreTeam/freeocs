@@ -143,3 +143,13 @@ FreeOCS 主程序
 | 作答 | JS 点击/写值 | ADB 坐标点击 |
 | 多媒体 | 浏览器视频/音频 + ASR/TTS | 手机端播放，v1 不处理 |
 | 续跑 | 页面监听 + 模块切换（待实现） | 工具循环内逐题推进 |
+
+---
+
+## License / 许可
+
+Copyright (C) 2026 qincnd <qincnd@qq.com>, XueZicheng <xuezicheng842@outlook.com>, AstercoreTeam.
+
+This project is licensed under the **GNU Affero General Public License v3.0 only** (`AGPL-3.0-only`).
+See [https://spdx.org/licenses/AGPL-3.0-only.html](https://spdx.org/licenses/AGPL-3.0-only.html).
+

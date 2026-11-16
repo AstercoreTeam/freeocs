@@ -1,3 +1,8 @@
+# Copyright 2026 AstercoreTeam
+# Copyright 2026 qincnd <qincnd@qq.com>
+# Copyright 2026 XueZicheng <xuezicheng842@outlook.com>
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """pywebview ``js_api`` exposed to the local frontend."""
 
 from __future__ import annotations
@@ -56,9 +61,37 @@ class UiApi:
                 settings=settings.summary(),
                 last_seq=app.events.last_seq,
                 ui=settings.section_values("ui", mask=True),
+                license={
+                    "required": not bool(settings.core_get("legal", "accepted", False)),
+                    "accepted": bool(settings.core_get("legal", "accepted", False)),
+                    "spdx": "AGPL-3.0-only",
+                },
             )
         except Exception as exc:  # noqa: BLE001
             return self._fail(exc)
+
+    def accept_license(self) -> dict[str, Any]:
+        try:
+            self.app.settings.save_section(
+                "legal",
+                {
+                    "accepted": True,
+                    "accepted_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                },
+            )
+            return self._ok(accepted=True)
+        except Exception as exc:  # noqa: BLE001
+            return self._fail(exc)
+
+    def decline_license(self) -> dict[str, Any]:
+        try:
+            import webview
+
+            if webview.windows:
+                webview.windows[0].destroy()
+        except Exception:
+            pass
+        return self._ok(exiting=True)
 
     def get_nav(self) -> dict[str, Any]:
         return self._ok(nav=NAV)

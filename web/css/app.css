@@ -1,3 +1,10 @@
+/**
+ * Copyright 2026 AstercoreTeam
+ * Copyright 2026 qincnd <qincnd@qq.com>
+ * Copyright 2026 XueZicheng <xuezicheng842@outlook.com>
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 * { box-sizing: border-box; }
 
 html, body {
@@ -367,3 +374,52 @@ code, pre { font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
   .focs-brand-text small { display: none; }
   .focs-status { display: none; }
 }
+
+
+/* License gate and legal footer */
+.focs-footer {
+  padding: 8px 16px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 11px;
+  text-align: center;
+  background: var(--bg-soft);
+}
+.license-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(10, 18, 32, .58);
+  backdrop-filter: blur(3px);
+}
+.license-gate[hidden] { display: none !important; }
+.license-card {
+  width: min(560px, 100%);
+  max-height: min(720px, 92vh);
+  overflow: auto;
+  padding: 24px;
+  border-radius: 14px;
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, .3);
+}
+.license-card h2 { margin: 0 0 12px; font-size: 20px; }
+.license-card p { line-height: 1.7; }
+.license-link-row a { color: var(--primary); word-break: break-all; }
+.license-agree {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  margin: 16px 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.license-agree input { margin-top: 3px; }
+.license-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.license-copy { margin-top: 18px; color: var(--text-muted); font-size: 11px; line-height: 1.6; }

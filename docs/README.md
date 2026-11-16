@@ -34,14 +34,14 @@ FreeOCS（Free Open Course Study）是一个本地优先、插件化的学习助
 | [04-ui-design.md](04-ui-design.md) | 界面导航、页面结构、模块面板注入、设置页 schema | 前端/UI |
 | [05-webcat-bridge.md](05-webcat-bridge.md) | 浏览器扩展、中继协议、页面 Agent 注入、安装引导 | 网页模块开发者 |
 | [06-android.md](06-android.md) | ADB 传输层、uiautomator、OCR 兜底、点击策略 | 手机模块开发者 |
-| [07-modules.md](07-modules.md) | U校园、智慧树模块的移植方案与验收标准 | 模块开发者 |
 | [mods/](mods/README.md) | 按平台拆分的实际实现：U校园页面/题型/流程，智慧树 ADB 流程 | 模块开发者 |
+| [plugins/](plugins/README.md) | 按插件拆分的实现：LLM、ASR、OCR、TTS/KokoClone | 插件开发者 |
 | [08-development.md](08-development.md) | 环境、运行、构建、打包、测试、里程碑 | 开发者 |
 | [10-token-usage.md](10-token-usage.md) | Token 统计、缓存命中/未命中/输出单价、消费限额、AI 兜底确认 | 开发者/用户 |
 | [11-voice-clone.md](11-voice-clone.md) | KokoClone 本地克隆语音、参考音频设置、独立环境 | 开发者/用户 |
 | [09-decisions.md](09-decisions.md) | 关键架构决策记录（ADR） | 所有人 |
 
-建议阅读顺序：`README → 01 → 02 → 03 → 04 → 05/06 → 07 → mods → 08 → 10 → 11`。
+建议阅读顺序：`README → 01 → 02 → 03 → 04 → 05/06 → mods → plugins → 08 → 10 → 11`。
 
 ## 3. 已确认的产品决策
 
@@ -101,3 +101,13 @@ FreeOCS（Free Open Course Study）是一个本地优先、插件化的学习助
 5. **打包形态**：优先 PyInstaller onedir + 安装包；onefile 仅作可选实验；模型不随包分发。
 
 如无异议，下一阶段按 `08-development.md` 的 M1 开始搭建框架骨架。
+
+---
+
+## License / 许可
+
+Copyright (C) 2026 qincnd <qincnd@qq.com>, XueZicheng <xuezicheng842@outlook.com>, AstercoreTeam.
+
+This project is licensed under the **GNU Affero General Public License v3.0 only** (`AGPL-3.0-only`).
+See [https://spdx.org/licenses/AGPL-3.0-only.html](https://spdx.org/licenses/AGPL-3.0-only.html).
+

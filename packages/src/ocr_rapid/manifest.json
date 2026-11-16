@@ -7,7 +7,7 @@
   "type": "plugin",
   "description": "使用 RapidOCR 识别截图文字与坐标；可回退到 tesseract。",
   "author": "FreeOCS",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "entry": "main:setup",
   "platform": "any",
   "requires": [],
@@ -18,7 +18,11 @@
       "description": "ONNX Runtime CPU 推理，返回文字与坐标"
     }
   },
-  "dependencies": ["rapidocr-onnxruntime>=1.4", "pillow>=10", "numpy>=1.26"],
+  "dependencies": [
+    "rapidocr-onnxruntime>=1.4",
+    "pillow>=10",
+    "numpy>=1.26"
+  ],
   "settings": [
     {
       "id": "ocr_rapid",
@@ -31,9 +35,18 @@
           "label": "引擎",
           "default": "auto",
           "options": [
-            {"value": "auto", "label": "自动（RapidOCR 优先，回退 tesseract）"},
-            {"value": "rapidocr", "label": "仅 RapidOCR"},
-            {"value": "tesseract", "label": "仅 tesseract"}
+            {
+              "value": "auto",
+              "label": "自动（RapidOCR 优先，回退 tesseract）"
+            },
+            {
+              "value": "rapidocr",
+              "label": "仅 RapidOCR"
+            },
+            {
+              "value": "tesseract",
+              "label": "仅 tesseract"
+            }
           ]
         },
         {

@@ -1,3 +1,10 @@
+/**
+ * Copyright 2026 AstercoreTeam
+ * Copyright 2026 qincnd <qincnd@qq.com>
+ * Copyright 2026 XueZicheng <xuezicheng842@outlook.com>
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 /* Main shell: navigation, page loading, header status and event polling. */
 (function () {
   "use strict";
@@ -120,7 +127,7 @@
       const info = (state.bootstrap && state.bootstrap.app) || {};
       await UI.modal({
         title: "关于 FreeOCS",
-        message: `版本：${info.version || "?"}\n平台：${info.platform || "?"}\nPython：${info.python || "?"}\n数据目录：${info.data_dir || "?"}\n设置目录：${info.config_dir || "?"}\n\n本地优先 · 插件化 · 绝不自动提交`,
+        message: `版本：${info.version || "?"}\n平台：${info.platform || "?"}\nPython：${info.python || "?"}\n数据目录：${info.data_dir || "?"}\n设置目录：${info.config_dir || "?"}\n\nCopyright 2026 AstercoreTeam\n作者：\nqincnd <qincnd@qq.com>\nXueZicheng <xuezicheng842@outlook.com>\n\n许可：GNU Affero General Public License v3.0 only\nhttps://spdx.org/licenses/AGPL-3.0-only.html\n\n本地优先 · 插件化 · 绝不自动提交`,
         confirmText: "知道了",
         cancelText: "关闭",
       });
@@ -214,6 +221,39 @@
     // hashchange will trigger loadPage
   }
 
+  function showLicenseGate() {
+    const gate = document.getElementById("license-gate");
+    const check = document.getElementById("license-check");
+    const accept = document.getElementById("license-accept");
+    const decline = document.getElementById("license-decline");
+    if (!gate || !check || !accept || !decline) return;
+    gate.hidden = false;
+    // Never inherit browser form restoration from a previous launch.
+    check.checked = false;
+    accept.disabled = true;
+    check.addEventListener("change", () => {
+      accept.disabled = !check.checked;
+    });
+    accept.addEventListener("click", async () => {
+      if (!check.checked) return;
+      try {
+        await API.must("accept_license");
+        gate.hidden = true;
+        await boot();
+      } catch (error) {
+        UI.toast(error.message || "无法保存协议同意状态", "error");
+      }
+    });
+    decline.addEventListener("click", async () => {
+      try {
+        await API.call("decline_license");
+      } catch (_) {
+        // Closing the window below is the final fallback.
+      }
+      try { window.close(); } catch (_) { /* ignore */ }
+    });
+  }
+
   async function boot() {
     try {
       const result = await API.call("get_bootstrap");
@@ -222,6 +262,10 @@
       }
       state.bootstrap = result;
       state.eventSeq = result.last_seq || 0;
+      if (result.license && result.license.required) {
+        showLicenseGate();
+        return;
+      }
       applyTheme((result.ui && result.ui.theme) || "light");
       renderNav(result.nav || []);
       bindHeader();
@@ -295,9 +339,22 @@
     openExternal: (url) => API.must("open_external", url),
   };
 
-  if (window.pywebview && window.pywebview.api) {
+  let bootStarted = false;
+  function startApp() {
+    if (bootStarted) return;
+    if (!window.pywebview || !window.pywebview.api) return;
+    bootStarted = true;
     boot();
+  }
+  if (window.pywebview && window.pywebview.api) {
+    startApp();
   } else {
-    window.addEventListener("pywebviewready", boot, { once: true });
+    window.addEventListener("pywebviewready", startApp, { once: true });
+    const poll = window.setInterval(() => {
+      if (window.pywebview && window.pywebview.api) {
+        window.clearInterval(poll);
+        startApp();
+      }
+    }, 100);
   }
 })();

@@ -7,11 +7,16 @@
   "type": "module",
   "description": "智慧树手机答题：ADB 读取控件树，AI 选择答案；遇到交卷页停止。",
   "author": "FreeOCS",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "entry": "main:setup",
   "platform": "android",
-  "requires": ["llm.chat", "android.adb"],
-  "optional_requires": ["media.ocr"],
+  "requires": [
+    "llm.chat",
+    "android.adb"
+  ],
+  "optional_requires": [
+    "media.ocr"
+  ],
   "provides": {},
   "dependencies": [],
   "min_app_version": "0.1.0",
@@ -20,7 +25,9 @@
       "id": "wisdomtree_console",
       "title": "智慧树状态",
       "entry": "web/panel.js",
-      "styles": ["web/panel.css"],
+      "styles": [
+        "web/panel.css"
+      ],
       "order": 100
     }
   ],
@@ -30,18 +37,109 @@
       "title": "智慧树",
       "order": 310,
       "fields": [
-        {"key": "device_serial", "type": "text", "label": "设备序列号", "default": "", "placeholder": "留空使用全局设置"},
-        {"key": "click_jitter", "type": "integer", "label": "点击随机偏移（像素）", "default": 2, "min": 0, "max": 20, "step": 1},
-        {"key": "dump_timeout", "type": "number", "label": "dump 超时（秒）", "default": 15, "min": 3, "max": 60, "step": 1},
-        {"key": "screenshot_timeout", "type": "number", "label": "截图超时（秒）", "default": 20, "min": 5, "max": 120, "step": 1},
-        {"key": "page_load_timeout", "type": "number", "label": "页面加载等待（秒）", "default": 8, "min": 1, "max": 60, "step": 1},
-        {"key": "poll_interval", "type": "number", "label": "操作后等待（秒）", "default": 0.8, "min": 0.2, "max": 10, "step": 0.1},
-        {"key": "max_tool_rounds", "type": "integer", "label": "最大工具轮数", "default": 30, "min": 3, "max": 100, "step": 1},
-        {"key": "temperature", "type": "number", "label": "模型温度", "default": 0.0, "min": 0, "max": 1, "step": 0.1},
-        {"key": "ocr_fallback", "type": "boolean", "label": "控件树失败时 OCR 兜底", "default": true},
-        {"key": "ocr_min_confidence", "type": "number", "label": "OCR 最低置信度", "default": 0.5, "min": 0, "max": 1, "step": 0.05},
-        {"key": "interval_min", "type": "number", "label": "操作间隔最小值（秒）", "default": 0.2, "min": 0, "max": 5, "step": 0.1},
-        {"key": "interval_max", "type": "number", "label": "操作间隔最大值（秒）", "default": 0.6, "min": 0, "max": 5, "step": 0.1}
+        {
+          "key": "device_serial",
+          "type": "text",
+          "label": "设备序列号",
+          "default": "",
+          "placeholder": "留空使用全局设置"
+        },
+        {
+          "key": "click_jitter",
+          "type": "integer",
+          "label": "点击随机偏移（像素）",
+          "default": 2,
+          "min": 0,
+          "max": 20,
+          "step": 1
+        },
+        {
+          "key": "dump_timeout",
+          "type": "number",
+          "label": "dump 超时（秒）",
+          "default": 15,
+          "min": 3,
+          "max": 60,
+          "step": 1
+        },
+        {
+          "key": "screenshot_timeout",
+          "type": "number",
+          "label": "截图超时（秒）",
+          "default": 20,
+          "min": 5,
+          "max": 120,
+          "step": 1
+        },
+        {
+          "key": "page_load_timeout",
+          "type": "number",
+          "label": "页面加载等待（秒）",
+          "default": 8,
+          "min": 1,
+          "max": 60,
+          "step": 1
+        },
+        {
+          "key": "poll_interval",
+          "type": "number",
+          "label": "操作后等待（秒）",
+          "default": 0.8,
+          "min": 0.2,
+          "max": 10,
+          "step": 0.1
+        },
+        {
+          "key": "max_tool_rounds",
+          "type": "integer",
+          "label": "最大工具轮数",
+          "default": 30,
+          "min": 3,
+          "max": 100,
+          "step": 1
+        },
+        {
+          "key": "temperature",
+          "type": "number",
+          "label": "模型温度",
+          "default": 0.0,
+          "min": 0,
+          "max": 1,
+          "step": 0.1
+        },
+        {
+          "key": "ocr_fallback",
+          "type": "boolean",
+          "label": "控件树失败时 OCR 兜底",
+          "default": true
+        },
+        {
+          "key": "ocr_min_confidence",
+          "type": "number",
+          "label": "OCR 最低置信度",
+          "default": 0.5,
+          "min": 0,
+          "max": 1,
+          "step": 0.05
+        },
+        {
+          "key": "interval_min",
+          "type": "number",
+          "label": "操作间隔最小值（秒）",
+          "default": 0.2,
+          "min": 0,
+          "max": 5,
+          "step": 0.1
+        },
+        {
+          "key": "interval_max",
+          "type": "number",
+          "label": "操作间隔最大值（秒）",
+          "default": 0.6,
+          "min": 0,
+          "max": 5,
+          "step": 0.1
+        }
       ]
     }
   ]

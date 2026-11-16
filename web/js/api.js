@@ -1,11 +1,36 @@
+/**
+ * Copyright 2026 AstercoreTeam
+ * Copyright 2026 qincnd <qincnd@qq.com>
+ * Copyright 2026 XueZicheng <xuezicheng842@outlook.com>
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 /* Thin wrapper around the pywebview js_api. */
 (function () {
   "use strict";
 
   function waitReady() {
     if (window.pywebview && window.pywebview.api) return Promise.resolve();
-    return new Promise((resolve) => {
-      window.addEventListener("pywebviewready", () => resolve(), { once: true });
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearInterval(poll);
+        window.removeEventListener("pywebviewready", finish);
+        resolve();
+      };
+      const poll = setInterval(() => {
+        if (window.pywebview && window.pywebview.api) finish();
+      }, 50);
+      window.addEventListener("pywebviewready", finish, { once: true });
+      window.setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        clearInterval(poll);
+        window.removeEventListener("pywebviewready", finish);
+        reject(new Error("pywebview 启动超时"));
+      }, 30000);
     });
   }
 

@@ -55,3 +55,13 @@
 - 网站改版会导致选择器失效；模块会停止并写 `unrecognized.log`。
 - 视频自动播放可能被浏览器拦截。
 - 系统录音未启用；听力音频必须能通过 URL 下载。
+
+---
+
+## License / 许可
+
+Copyright (C) 2026 qincnd <qincnd@qq.com>, XueZicheng <xuezicheng842@outlook.com>, AstercoreTeam.
+
+This project is licensed under the **GNU Affero General Public License v3.0 only** (`AGPL-3.0-only`).
+See [https://spdx.org/licenses/AGPL-3.0-only.html](https://spdx.org/licenses/AGPL-3.0-only.html).
+

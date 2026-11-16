@@ -38,3 +38,13 @@ Android 版智慧树答题：通过 ADB 读取 `uiautomator` 控件树，由大�
 - 控件树读不到的 WebView/游戏引擎页面，OCR 只能兜底，可能无法定位。
 - 中文输入依赖 ADBKeyboard；v1 主要面向选择题。
 - 不做风控绕过，不自动交卷。
+
+---
+
+## License / 许可
+
+Copyright (C) 2026 qincnd <qincnd@qq.com>, XueZicheng <xuezicheng842@outlook.com>, AstercoreTeam.
+
+This project is licensed under the **GNU Affero General Public License v3.0 only** (`AGPL-3.0-only`).
+See [https://spdx.org/licenses/AGPL-3.0-only.html](https://spdx.org/licenses/AGPL-3.0-only.html).
+

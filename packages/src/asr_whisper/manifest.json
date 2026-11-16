@@ -7,7 +7,7 @@
   "type": "plugin",
   "description": "使用本地 faster-whisper 模型转写音频，离线可用。",
   "author": "FreeOCS",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "entry": "main:setup",
   "platform": "any",
   "requires": [],
@@ -18,7 +18,10 @@
       "description": "CPU/GPU 本地转写"
     }
   },
-  "dependencies": ["faster-whisper>=1.2,<2", "av>=15,<16"],
+  "dependencies": [
+    "faster-whisper>=1.2,<2",
+    "av>=15,<16"
+  ],
   "settings": [
     {
       "id": "asr_whisper",
@@ -39,8 +42,14 @@
           "label": "设备",
           "default": "cpu",
           "options": [
-            {"value": "cpu", "label": "CPU"},
-            {"value": "cuda", "label": "CUDA"}
+            {
+              "value": "cpu",
+              "label": "CPU"
+            },
+            {
+              "value": "cuda",
+              "label": "CUDA"
+            }
           ]
         },
         {
@@ -49,9 +58,18 @@
           "label": "计算精度",
           "default": "int8",
           "options": [
-            {"value": "int8", "label": "int8"},
-            {"value": "float16", "label": "float16"},
-            {"value": "float32", "label": "float32"}
+            {
+              "value": "int8",
+              "label": "int8"
+            },
+            {
+              "value": "float16",
+              "label": "float16"
+            },
+            {
+              "value": "float32",
+              "label": "float32"
+            }
           ]
         },
         {

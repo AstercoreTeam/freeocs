@@ -1,3 +1,8 @@
+# Copyright 2026 AstercoreTeam
+# Copyright 2026 qincnd <qincnd@qq.com>
+# Copyright 2026 XueZicheng <xuezicheng842@outlook.com>
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Headless-ish UI smoke test: start the real window and inspect rendered DOM.
 
 Run from the repo root:
@@ -22,6 +27,7 @@ from freeocs.app import Application  # noqa: E402
 
 def main() -> int:
     app = Application(port=int(os.environ.get("SMOKE_PORT", "8899")))
+    app.settings.save_section("legal", {"accepted": True})
     app.load_packages()
     api = app.create_ui_api()
     web_dir = app.paths.web_dir

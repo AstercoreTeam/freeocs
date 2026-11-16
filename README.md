@@ -63,3 +63,28 @@ Wayland 下若窗口异常，可尝试 `GDK_BACKEND=x11`。
 PLAYWRIGHT_BROWSERS_PATH=$PWD/.playwright \
   FREEOCS_PACKAGES=dist .venv/bin/python scripts/e2e_ucampus.py
 ```
+
+---
+
+## License / 许可
+
+Copyright (C) 2026 qincnd <qincnd@qq.com>, XueZicheng <xuezicheng842@outlook.com>, AstercoreTeam.
+
+This project is licensed under the **GNU Affero General Public License v3.0 only** (`AGPL-3.0-only`).
+See [https://spdx.org/licenses/AGPL-3.0-only.html](https://spdx.org/licenses/AGPL-3.0-only.html).
+
+
+## 贡献
+
+欢迎提交 Issue 和 Pull Request。请参阅[CONTRIBUTING.md](CONTRIBUTING.md)、[ToDo文档](ToDo.md)
+
+## 联系方式
+---
+
+作者
+
+qincnd <qincnd@qq.com>
+
+Xue Zicheng <xuezicheng842@outlook.com>
+
+---

@@ -7,7 +7,7 @@
   "type": "plugin",
   "description": "使用 KokoClone/Kokoro + Kanade，把用户提供的参考音频克隆为朗读声音。",
   "author": "FreeOCS",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "entry": "main:setup",
   "platform": "any",
   "requires": [],

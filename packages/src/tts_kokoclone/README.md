@@ -44,3 +44,13 @@ FreeOCS TTS 能力
 - 第一次使用会下载 Kanade 模型，可能需要较长时间。
 - 合成在 KokoClone 独立环境中运行，不会阻塞主程序启动。
 - 参考音频质量直接决定克隆效果。
+
+---
+
+## License / 许可
+
+Copyright (C) 2026 qincnd <qincnd@qq.com>, XueZicheng <xuezicheng842@outlook.com>, AstercoreTeam.
+
+This project is licensed under the **GNU Affero General Public License v3.0 only** (`AGPL-3.0-only`).
+See [https://spdx.org/licenses/AGPL-3.0-only.html](https://spdx.org/licenses/AGPL-3.0-only.html).
+
