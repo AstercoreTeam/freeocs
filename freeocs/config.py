@@ -155,6 +155,33 @@ CORE_SECTIONS: list[dict[str, Any]] = [
         ],
     },
     {
+        "id": "usage",
+        "title": "Token 消耗",
+        "description": "按模型返回的 usage 统计 token；单价与限额用人民币。",
+        "group": "core",
+        "order": 25,
+        "fields": [
+            field(
+                "price_per_million",
+                "百万 token 单价（元）",
+                "number",
+                0.0,
+                min=0,
+                step=0.01,
+                help="例如 2 表示每 100 万 token 2 元。0 表示只统计、不计费。",
+            ),
+            field(
+                "monthly_limit",
+                "每月消费限额（元）",
+                "number",
+                0.0,
+                min=0,
+                step=1,
+                help="0 表示不限制。达到限额后会阻止新的模型调用；提高限额后立即恢复。",
+            ),
+        ],
+    },
+    {
         "id": "bridge",
         "title": "浏览器自动化",
         "description": "浏览器扩展与本地中继。",

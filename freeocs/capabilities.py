@@ -48,6 +48,10 @@ class CapabilityRegistry:
         self._lock = threading.RLock()
         self._providers: dict[str, list[ProviderRecord]] = {}
         self._bindings: dict[str, str] = {}
+        self._usage: Any = None
+
+    def set_usage(self, usage: Any) -> None:
+        self._usage = usage
 
     # -- registration ------------------------------------------------------
     def register_core(
@@ -139,6 +143,8 @@ class CapabilityRegistry:
     def require(self, capability: str, *, consumer: str = "") -> Any:
         record = self.active_record(capability)
         if record is not None:
+            if capability == "llm.chat" and self._usage is not None:
+                return self._usage.wrap(record.provider, consumer=consumer)
             return record.provider
         with self._lock:
             providers = self._providers.get(capability, [])

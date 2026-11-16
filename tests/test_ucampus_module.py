@@ -27,6 +27,24 @@ class FakeLLM:
         return None
 
 
+class FakePageLLM:
+    def chat(self, messages, **kwargs):
+        return ChatResult(
+            message={
+                "role": "assistant",
+                "content": (
+                    '{"actions":['
+                    '{"type":"click","index":0,"reason":"提交按钮"},'
+                    '{"type":"click","index":1,"reason":"选择 B"}'
+                    '],"answer":"B","explanation":"fallback"}'
+                ),
+            }
+        )
+
+    def close(self) -> None:
+        return None
+
+
 class FakeASR:
     def transcribe(self, audio, **kwargs):
         raise AssertionError("not used")
@@ -166,6 +184,39 @@ def test_ucampus_waiting_and_finish(ucampus_host) -> None:
     assert state["message"] == "等待手动提交"
 
 
+def test_ucampus_page_fallback_saves_and_filters_submit(ucampus_host) -> None:
+    host, registry, _manager = ucampus_host
+    registry.register_provider("page_llm", "llm.chat", FakePageLLM(), title="page")
+    registry.set_binding("llm.chat", "page_llm")
+    payload = {
+        "url": "https://course.unipus.cn/custom/1",
+        "title": "自定义题型",
+        "reason": "未识别题型",
+        "question": "Which one?",
+        "question_type": "unsupported",
+        "html": "<html><body><button>提交</button><div>B. two</div></body></html>",
+        "text": "Which one? B. two",
+        "elements": [
+            {"index": 0, "tag": "button", "kind": "clickable", "text": "提交"},
+            {"index": 1, "tag": "div", "kind": "clickable", "text": "B. two"},
+        ],
+    }
+    saved = host.handle_agent_request("ucampus", "save-page", payload)
+    assert saved["page_path"]
+    assert Path(saved["page_path"]).is_file()
+    result = host.handle_agent_request(
+        "ucampus",
+        "answer-page",
+        {**payload, "page_path": saved["page_path"]},
+    )
+    assert result["page_path"]
+    saved = Path(result["page_path"])
+    assert saved.is_file()
+    assert "B. two" in saved.read_text(encoding="utf-8")
+    assert [action["index"] for action in result["actions"]] == [1]
+    assert result["answer"] == "B"
+
+
 def test_page_agent_has_no_auto_submit() -> None:
     code = AGENT.read_text(encoding="utf-8")
     assert "waitingForManual" in code
@@ -180,3 +231,11 @@ def test_page_agent_has_no_auto_submit() -> None:
     assert "button.click();" not in code[code.index("async function confirmSubmitDialog"):code.index("async function clickPageAction")]
     assert "freeocs-ucampus-panel" in code
     assert "updateControlPanel" in code
+    assert "runWebFallback" in code
+    assert "answer-page" in code
+    assert "isUnsafeActionLabel" in code
+    assert "pageContextForModel" in code
+    assert "正确答案：" in code
+    assert "await dragSortable" not in code
+    assert "window.confirm" in code
+    assert "save-page" in code

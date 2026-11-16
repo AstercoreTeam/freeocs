@@ -333,6 +333,33 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if path == "/extension/status":
             return self._json(self.server.app.bridge_status())
+        if path == "/api/tabs":
+            try:
+                tabs = self.server.app.bridge.list_tabs(timeout=10)
+            except BridgeError as exc:
+                return self._error(504, str(exc), "BRIDGE_ERROR")
+            return self._json({"ok": True, "tabs": tabs})
+        if path == "/api/page":
+            try:
+                info = self.server.app.bridge.page_info(timeout=15)
+            except BridgeError as exc:
+                return self._error(504, str(exc), "BRIDGE_ERROR")
+            return self._json({"ok": True, "page": info})
+        if path == "/api/page/reload":
+            try:
+                info = self.server.app.bridge.page_info(timeout=15)
+                url = str(info.get("url", "") or "")
+                if not url.startswith(("http://", "https://")):
+                    return self._error(400, "当前页面不是 http(s)")
+                head, _, fragment = url.partition("#")
+                joiner = "&" if "?" in head else "?"
+                reload_url = f"{head}{joiner}freeocs_reload={time.time_ns()}"
+                if fragment:
+                    reload_url = f"{reload_url}#{fragment}"
+                result = self.server.app.bridge.navigate(reload_url, timeout=15)
+            except BridgeError as exc:
+                return self._error(504, str(exc), "BRIDGE_ERROR")
+            return self._json({"ok": True, "result": result})
         if path == "/extension/poll":
             query = parse_qs(parsed.query)
             try:
@@ -391,6 +418,24 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception as exc:  # noqa: BLE001
                 logger.exception("模块请求失败 %s/%s", module_id, method)
                 return self._error(500, str(exc), "MODULE_ERROR")
+            return self._json({"ok": True, "result": result})
+        if path == "/api/tabs/activate":
+            pattern = str(body.get("url_pattern", "") or "")
+            if not pattern:
+                return self._error(400, "缺少 url_pattern")
+            try:
+                result = self.server.app.bridge.activate(pattern, timeout=15)
+            except BridgeError as exc:
+                return self._error(504, str(exc), "BRIDGE_ERROR")
+            return self._json({"ok": True, "result": result})
+        if path == "/api/tabs/target":
+            tab_id = body.get("tab_id")
+            if tab_id is None:
+                return self._error(400, "缺少 tab_id")
+            try:
+                result = self.server.app.bridge.set_target(tab_id, timeout=10)
+            except BridgeError as exc:
+                return self._error(504, str(exc), "BRIDGE_ERROR")
             return self._json({"ok": True, "result": result})
         if path == "/call":
             method = str(body.get("method", "") or "")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 import threading
 import time
@@ -14,7 +15,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
-from freeocs.sdk import Module, ModuleContext, ModuleError, ProviderError
+from freeocs.sdk import (
+    Module,
+    ModuleContext,
+    ModuleError,
+    ProviderError,
+    parse_json_object,
+)
 
 from .prompts import build_prompt, parse_answer
 
@@ -186,6 +193,8 @@ class UcampusModule(Module):
             "report": self._report,
             "log": self._log,
             "answer": self._answer,
+            "save-page": self._save_page_endpoint,
+            "answer-page": self._answer_page,
             "transcribe": self._transcribe,
             "transcribe-url": self._transcribe_url,
             "listen": self._listen,
@@ -401,6 +410,166 @@ class UcampusModule(Module):
             "model": str((result.message or {}).get("model", "") or ""),
             "question_type": question_type,
         }
+
+    def _answer_page(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Save an unsupported page and ask the model for a small action plan."""
+        url = str(payload.get("url", "") or "")[:2048]
+        title = str(payload.get("title", "") or "")[:500]
+        reason = str(payload.get("reason", "") or "")[:1000]
+        question = str(payload.get("question", "") or "")[:12000]
+        text = str(payload.get("text", "") or "")[:12000]
+        elements = payload.get("elements")
+        if not isinstance(elements, list):
+            elements = []
+        elements = [item for item in elements[:100] if isinstance(item, dict)]
+
+        page_path = str(payload.get("page_path", "") or "") or self._save_page(payload)
+
+        if not bool(self.ctx.settings.get("web_fallback", True)):
+            return {
+                "actions": [],
+                "answer": "",
+                "explanation": "",
+                "page_path": page_path,
+                "error": "网页 AI 兜底已关闭",
+            }
+
+        lines = [
+            "页面自动识别失败，请根据题目和页面元素决定如何作答。",
+            f"页面：{title} {url}",
+            f"原因：{reason}",
+            f"题目：{question or '(未提取到题目文本)'}",
+            f"页面文本：\n{text}",
+            "可操作元素（只能使用这些 index）：",
+            json.dumps(elements, ensure_ascii=False)[:12000],
+            "只返回 JSON：",
+            '{"actions":[{"type":"click","index":0,"reason":"..."},'
+            '{"type":"set_value","index":1,"value":"..."}],'
+            '"answer":"...","explanation":"..."}',
+            "规则：最多 6 个动作；click 用于按钮/选项/标签；set_value 用于输入框；"
+            "select 用于下拉框（value 可为选项文本）；"
+            "绝对不能点击提交、交卷、发布、确定提交、评分提交等不可逆按钮；"
+            "如果无法确定，actions 为空并在 explanation 说明。",
+        ]
+        prompt = "\n\n".join(lines)
+        try:
+            llm = self.ctx.require("llm.chat")
+            result = llm.chat(
+                [
+                    {"role": "system", "content": "你是网页操作助手，只输出 JSON 操作计划。"},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.1,
+                timeout=float(self.ctx.settings.get("answer_timeout", 300) or 300),
+            )
+            raw = str((result.message or {}).get("content") or "")
+            plan = parse_json_object(raw)
+            actions = self._validate_page_actions(plan.get("actions"), elements)
+            answer = str(plan.get("answer", "") or "")[:5000]
+            explanation = str(plan.get("explanation", "") or "")[:2000]
+            return {
+                "actions": actions,
+                "answer": answer,
+                "explanation": explanation,
+                "page_path": page_path,
+                "raw": raw[:4000],
+                "model": str((result.message or {}).get("model", "") or ""),
+            }
+        except Exception as exc:  # noqa: BLE001
+            self.ctx.log("warn", f"网页 AI 兜底失败：{exc}")
+            return {
+                "actions": [],
+                "answer": "",
+                "explanation": "",
+                "page_path": page_path,
+                "error": str(exc),
+            }
+
+    @staticmethod
+    def _validate_page_actions(raw_actions: Any, elements: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if not isinstance(raw_actions, list):
+            return []
+        by_index = {int(item.get("index")): item for item in elements if str(item.get("index", "")).isdigit()}
+        submit_words = ("提交", "交卷", "发布", "评分提交", "确定提交", "保存并提交")
+        actions: list[dict[str, Any]] = []
+        for item in raw_actions[:6]:
+            if not isinstance(item, dict):
+                continue
+            kind = str(item.get("type", "") or "")
+            try:
+                index = int(item.get("index"))
+            except (TypeError, ValueError):
+                continue
+            target = by_index.get(index)
+            if target is None:
+                continue
+            label = " ".join(
+                str(target.get(key, "") or "") for key in ("text", "aria", "placeholder", "value")
+            )
+            if kind == "click" and any(word in label for word in submit_words):
+                continue
+            if kind not in {"click", "set_value", "select"}:
+                continue
+            action: dict[str, Any] = {
+                "type": kind,
+                "index": index,
+                "reason": str(item.get("reason", "") or "")[:300],
+            }
+            if kind in {"set_value", "select"}:
+                action["value"] = str(item.get("value", "") or "")[:5000]
+            actions.append(action)
+        return actions
+
+    def _save_page_endpoint(self, payload: dict[str, Any]) -> dict[str, Any]:
+        page_path = self._save_page(payload)
+        if not page_path:
+            raise ModuleError("保存页面失败")
+        return {"page_path": page_path}
+
+    def _save_page(self, payload: dict[str, Any]) -> str:
+        url = str(payload.get("url", "") or "")[:2048]
+        title = str(payload.get("title", "") or "")[:500]
+        reason = str(payload.get("reason", "") or "")[:1000]
+        question = str(payload.get("question", "") or "")[:12000]
+        question_type = str(payload.get("question_type", "") or "unsupported")[:40]
+        html = str(payload.get("html", "") or "")
+        text = str(payload.get("text", "") or "")[:12000]
+        elements = payload.get("elements")
+        if not isinstance(elements, list):
+            elements = []
+        elements = [item for item in elements[:100] if isinstance(item, dict)]
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        digest = hashlib.sha1((url + text[:2000]).encode("utf-8", "replace")).hexdigest()[:10]
+        folder = self.ctx.data_dir / "unsupported_pages"
+        folder.mkdir(parents=True, exist_ok=True)
+        base = folder / f"{stamp}-{digest}"
+        html_path = base.with_suffix(".html")
+        meta_path = base.with_suffix(".json")
+        try:
+            html_path.write_text(html[:2_000_000], encoding="utf-8")
+            meta_path.write_text(
+                json.dumps(
+                    {
+                        "saved_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                        "url": url,
+                        "title": title,
+                        "reason": reason,
+                        "question_type": question_type,
+                        "question": question,
+                        "text": text,
+                        "elements": elements,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            path = str(html_path)
+            self.ctx.log("warn", f"已保存不支持的页面：{path}")
+            return path
+        except OSError as exc:
+            self.ctx.log("warn", f"保存不支持页面失败：{exc}")
+            return ""
 
     def _transcribe(self, payload: dict[str, Any]) -> dict[str, Any]:
         encoded = str(payload.get("audio_base64", "") or "")

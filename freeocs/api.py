@@ -72,6 +72,12 @@ class UiApi:
         except Exception as exc:  # noqa: BLE001
             return self._fail(exc)
 
+    def get_usage(self) -> dict[str, Any]:
+        try:
+            return self._ok(usage=self.app.usage.summary())
+        except Exception as exc:  # noqa: BLE001
+            return self._fail(exc)
+
     # -- packages ----------------------------------------------------------
     def list_packages(self) -> dict[str, Any]:
         try:

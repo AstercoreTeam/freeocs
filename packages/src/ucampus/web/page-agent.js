@@ -380,6 +380,26 @@
     return text.length >= 12 ? text.slice(0, 12000) : "";
   }
 
+  function pageContextForModel() {
+    for (const doc of pageDocuments()) {
+      const root = doc.querySelector(
+        "main, article, .question-wrap, .question-basic, [class*='question-content']"
+      ) || doc.body;
+      if (!root) continue;
+      const clone = root.cloneNode(true);
+      clone.querySelectorAll(
+        "#uca-panel, #freeocs-ucampus-panel, script, style, header, footer, nav, aside, " +
+        "button, input, textarea, select, .question-common-abs-choice, .option-wrap, " +
+        ".question-common-abs-reply, .pc-header-tasks-container, .pc-header-tabs-container, " +
+        ".pc-slider-menu-micro, .v3notes, .mark-info-btns, [class*='notes'], " +
+        "[class*='comment'], [class*='discussion'], [class*='video-js']"
+      ).forEach((element) => element.remove());
+      const text = (clone.innerText || clone.textContent || "").trim();
+      if (text.length >= 40) return text.slice(0, 12000);
+    }
+    return "";
+  }
+
   const answeredChoiceKeys = new Set();
 
   function choiceGroupKey(group) {
@@ -605,7 +625,13 @@
         "textarea[placeholder], input[placeholder], " +
         "[contenteditable='true'][data-placeholder]"
       )].filter((element) => {
-        if (!visible(element) || element.closest("#uca-panel, #freeocs-ucampus-panel")) return false;
+        if (element.closest("#uca-panel, #freeocs-ucampus-panel")) return false;
+        if (!visible(element)) {
+          // fill-blank components often keep the real <input> visually hidden
+          // and expose a clickable .comp-abs-input wrapper instead.
+          const wrapper = element.closest(".comp-abs-input");
+          if (!wrapper || !visible(wrapper)) return false;
+        }
         const hint = [
           element.className,
           element.getAttribute("placeholder"),
@@ -688,43 +714,30 @@
     const startX = sourceRect.left + sourceRect.width / 2;
     const startY = sourceRect.top + sourceRect.height / 2;
     const endX = targetRect.left + targetRect.width / 2;
-    const endY = targetRect.top + targetRect.height / 2;
-    const transfer = new DataTransfer();
-    transfer.setData("text/plain", "drag");
-    transfer.effectAllowed = "move";
-    const fire = (element, type, x, y) => element.dispatchEvent(new DragEvent(type, {
-      bubbles: true,
-      cancelable: true,
-      dataTransfer: transfer,
-      clientX: x,
-      clientY: y,
-    }));
-    fire(source, "dragstart", startX, startY);
+    // Drop slightly above the target centre so the item is inserted *before*
+    // the target.  U校园's sortable uses mouse events, not HTML5 DnD.
+    const endY = targetRect.top + Math.min(8, targetRect.height / 4);
+    const fire = (element, type, x, y, buttons = 1) => element.dispatchEvent(
+      new MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        buttons,
+        clientX: x,
+        clientY: y,
+      })
+    );
+    fire(source, "mousedown", startX, startY);
     await wait(120);
-    fire(target, "dragenter", endX, endY);
-    fire(target, "dragover", endX, endY);
-    await wait(120);
-    fire(target, "drop", endX, endY);
-    fire(source, "dragend", endX, endY);
-    await wait(350);
-
-    source.dispatchEvent(new MouseEvent("mousedown", {
-      bubbles: true, cancelable: true, button: 0,
-      clientX: startX, clientY: startY,
-    }));
-    for (let step = 1; step <= 8; step += 1) {
-      const x = startX + ((endX - startX) * step) / 8;
-      const y = startY + ((endY - startY) * step) / 8;
-      document.dispatchEvent(new MouseEvent("mousemove", {
-        bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y,
-      }));
+    for (let step = 1; step <= 12; step += 1) {
+      const x = startX + ((endX - startX) * step) / 12;
+      const y = startY + ((endY - startY) * step) / 12;
+      fire(document, "mousemove", x, y);
       await wait(60);
     }
-    target.dispatchEvent(new MouseEvent("mouseup", {
-      bubbles: true, cancelable: true, button: 0,
-      clientX: endX, clientY: endY,
-    }));
-    await wait(350);
+    fire(target, "mouseup", endX, endY, 0);
+    fire(document, "mouseup", endX, endY, 0);
+    await wait(500);
   }
 
   async function applyAnswer(answer, controls) {
@@ -740,21 +753,17 @@
         .map((letter) => controls.meanings.find((item) => item.label === letter))
         .filter(Boolean);
       if (desired.length !== controls.meanings.length) {
-        throw new Error(`模型返回 ${desired.length} 个匹配，页面有 ${controls.meanings.length} 项。`);
+        throw new Error(`模型返回 ${desired.length} 个答案，页面有 ${controls.meanings.length} 项。`);
       }
-      const wrapper = controls.wrapper;
-      for (let index = 0; index < desired.length; index += 1) {
-        const current = [...wrapper.querySelectorAll(".sequence-reply-view-item-text")];
-        if (current[index] === desired[index].element) continue;
-        await dragSortable(desired[index].element, current[index]);
-      }
-      const finalOrder = [...wrapper.querySelectorAll(".sequence-reply-view-item-text")]
-        .map((element) => (element.innerText || "").trim());
-      const expectedOrder = desired.map((item) => item.text);
-      if (finalOrder.join("|") !== expectedOrder.join("|")) {
-        throw new Error(`拖拽排序未生效，实际顺序：${finalOrder.join(" / ")}`);
-      }
-      updateRunLog(`匹配顺序已调整：${letters.join(",")}`, "info");
+      const sequence = desired.map((item) => item.label).join(" → ");
+      const pairs = desired.map((item, index) => {
+        const word = (controls.words?.[index] || String(index + 1)).replace(/\.$/, "").trim();
+        return `${word} → ${item.label}`;
+      }).join("；");
+      updateRunLog(`排序/匹配正确答案：${sequence}`, "info");
+      updateRunLog(`对应关系：${pairs}`, "info");
+      setStatus(`正确答案：${sequence}（请手动拖拽，不会自动提交）`);
+      await waitingForManual(`排序/匹配答案：${sequence}；请手动拖拽后提交`);
       return;
     }
     if (controls.type === "dropdown") {
@@ -2010,6 +2019,163 @@
     return !/上传失败|文件上传失败|上传出错/.test(doc.body?.innerText || "");
   }
 
+  function collectFallbackElements() {
+    const result = [];
+    let index = 0;
+    for (const doc of pageDocuments()) {
+      const nodes = [...doc.querySelectorAll(
+        "button, input, textarea, select, [role='button'], [role='radio'], " +
+        "[role='checkbox'], [contenteditable='true']"
+      )];
+      for (const element of nodes) {
+        if (!visible(element) || element.closest("#uca-panel, #freeocs-ucampus-panel")) continue;
+        if (element.disabled || element.getAttribute("aria-disabled") === "true") continue;
+        const tag = element.tagName.toLowerCase();
+        const role = (element.getAttribute("role") || "").toLowerCase();
+        let kind = "clickable";
+        if (tag === "input") {
+          kind = ["radio", "checkbox"].includes(element.type) ? element.type : "input";
+        } else if (tag === "textarea" || element.isContentEditable) {
+          kind = "input";
+        } else if (tag === "select") {
+          kind = "select";
+        } else if (role === "radio" || role === "checkbox") {
+          kind = role;
+        }
+        const label = (element.innerText || element.getAttribute("aria-label") ||
+          element.getAttribute("title") || element.value ||
+          element.getAttribute("placeholder") || "").trim().slice(0, 300);
+        element.setAttribute("data-freeocs-el", String(index));
+        result.push({
+          index,
+          tag,
+          kind,
+          type: element.type || "",
+          text: label,
+          value: String(element.value || "").slice(0, 500),
+          placeholder: element.getAttribute("placeholder") || "",
+          aria: element.getAttribute("aria-label") || "",
+          checked: Boolean(element.checked),
+          disabled: Boolean(element.disabled),
+        });
+        index += 1;
+        if (index >= 100) break;
+      }
+      if (index >= 100) break;
+    }
+    return result;
+  }
+
+  function findFallbackElement(index) {
+    const value = String(index);
+    for (const doc of pageDocuments()) {
+      const element = doc.querySelector(`[data-freeocs-el="${value}"]`);
+      if (element) return element;
+    }
+    return null;
+  }
+
+  function isUnsafeActionLabel(text) {
+    return /提交|交卷|发布|评分提交|确定提交|保存并提交/.test(String(text || ""));
+  }
+
+  async function runWebFallback(question, reason) {
+    const elements = collectFallbackElements();
+    const interactive = elements.some((item) =>
+      ["input", "radio", "checkbox", "select"].includes(item.kind)
+    );
+    if (!elements.length) return false;
+    if (!question && !interactive) return false;
+    const clone = document.documentElement.cloneNode(true);
+    clone.querySelectorAll("#freeocs-ucampus-panel, #freeocs-ucampus-panel-style")
+      .forEach((element) => element.remove());
+    const html = clone.outerHTML.slice(0, 1_500_000);
+    const text = (document.body?.innerText || "").slice(0, 12000);
+    const payload = {
+      url: location.href,
+      title: document.title,
+      reason: reason || "未识别题型",
+      question: question || "",
+      question_type: "unsupported",
+      html,
+      text,
+      elements,
+    };
+    let pagePath = "";
+    try {
+      const saved = await request("/api/module/ucampus/save-page", payload);
+      pagePath = saved?.page_path || "";
+      if (pagePath) updateRunLog(`已保存页面供开发：${pagePath}`, "info");
+    } catch (error) {
+      updateRunLog(`保存不支持页面失败：${error.message}`, "warn");
+    }
+    const estimate = Math.max(1, Math.ceil((html.length + text.length) / 4));
+    const message = [
+      "AI 网页兜底会把当前页面内容发送给模型，可能消耗较多 token。",
+      `预计输入约 ${estimate.toLocaleString()} tokens（仅估算）。`,
+      "是否继续？",
+    ].join("\n\n");
+    const confirmed = typeof window.confirm === "function" ? window.confirm(message) : true;
+    if (!confirmed) {
+      updateRunLog("已取消 AI 网页兜底，未发送给模型", "warn");
+      return false;
+    }
+    updateRunLog(`用户确认 AI 网页兜底：${reason || "未识别题型"}`, "info");
+    let response;
+    try {
+      response = await request("/api/module/ucampus/answer-page", {
+        ...payload,
+        page_path: pagePath,
+      });
+    } catch (error) {
+      updateRunLog(`AI 网页兜底请求失败：${error.message}`, "error");
+      return false;
+    }
+    if (response?.page_path) {
+      updateRunLog(`页面记录：${response.page_path}`, "info");
+    }
+    const actions = Array.isArray(response?.actions) ? response.actions : [];
+    if (!actions.length) {
+      updateRunLog(
+        `AI 网页兜底没有可执行操作${response?.error ? `：${response.error}` : ""}`,
+        "warn"
+      );
+      return false;
+    }
+    let executed = 0;
+    for (const action of actions) {
+      const element = findFallbackElement(action.index);
+      if (!element) continue;
+      const label = element.innerText || element.getAttribute("aria-label") || "";
+      if (isUnsafeActionLabel(label) || isUnsafeActionLabel(action.reason)) continue;
+      if (action.type === "click") {
+        element.click();
+      } else if (action.type === "set_value") {
+        writeText(element, String(action.value || ""));
+      } else if (action.type === "select") {
+        const value = String(action.value || "");
+        const option = [...element.options || []].find((item) =>
+          item.text.trim() === value || item.value === value
+        );
+        element.value = option ? option.value : value;
+        element.dispatchEvent(new Event("input", { bubbles: true }));
+        element.dispatchEvent(new Event("change", { bubbles: true }));
+      } else {
+        continue;
+      }
+      executed += 1;
+      await wait(350);
+    }
+    if (!executed) {
+      updateRunLog("AI 网页兜底操作均被安全过滤或元素失效", "warn");
+      return false;
+    }
+    updateRunLog(`AI 网页兜底已执行 ${executed} 个操作`, "success");
+    await wait(700);
+    await clickPageAction();
+    return true;
+  }
+
   async function processQuestion() {
     if (dismissBlockingDialog()) await wait(500);
     if (pendingNavigation) {
@@ -2020,10 +2186,6 @@
     }
     if (await confirmSubmitDialog()) {
       await waitingForManual("检测到提交确认弹窗，等待手动提交");
-      return false;
-    }
-    if (hasSubmitAction()) {
-      await waitingForManual("当前页面已到提交步骤，等待手动提交");
       return false;
     }
     if (dismissBlockingDialog()) await wait(400);
@@ -2130,6 +2292,7 @@
         const result = await request("/api/answer", {
           question: prompt,
           question_type: "essay",
+          context: pageContextForModel(),
         });
         if (!result.answer) {
           updateRunLog(`问答题 ${index + 1} 未生成答案`, "error");
@@ -2198,6 +2361,13 @@
         updateRunLog("本页选择题已全部作答，继续下一节", "info");
         return { type: "content" };
       }
+      if (controls.type === "unsupported") {
+        const handled = await runWebFallback(
+          question || "",
+          controls.reason || "未识别题型"
+        );
+        if (handled) return { type: "question" };
+      }
       if (question && !looksLikeQuestion(question)) {
         updateRunLog("当前为无题目学习页，跳过答题并继续", "info");
         return { type: "content" };
@@ -2211,6 +2381,8 @@
     if (controls.type === "oral") {
       updateRunLog(`口语题：请求模型，题目长度 ${questionForModel.length}`, "info");
     }
+    const contextParts = [pageContextForModel()];
+    if (videoTranscript) contextParts.push(`[视频内容转写]\n${videoTranscript}`);
     const result = await request("/api/answer", {
       question: questionForModel,
       options: controls.options?.map((option, index) =>
@@ -2218,6 +2390,7 @@
       ) || [],
       question_type: controls.type,
       blank_count: controls.type === "blanks" ? controls.fields.length : 0,
+      context: contextParts.filter(Boolean).join("\n\n"),
     });
     if (controls.type === "oral") {
       if (!result.answer) {

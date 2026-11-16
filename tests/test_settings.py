@@ -12,8 +12,10 @@ def test_defaults_and_sections(tmp_path: Path) -> None:
     store = SettingsStore(tmp_path / "settings.json")
     assert store.core_get("llm", "model") == "deepseek-chat"
     ids = [section["id"] for section in store.schema()]
-    assert ids[:3] == ["ui", "llm", "bridge"]
+    assert ids[:4] == ["ui", "llm", "usage", "bridge"]
     assert "android" in ids
+    assert store.core_get("usage", "price_per_million") == 0.0
+    assert store.core_get("usage", "monthly_limit") == 0.0
 
 
 def test_save_and_mask_secret(tmp_path: Path) -> None:

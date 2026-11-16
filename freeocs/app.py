@@ -20,6 +20,7 @@ from .paths import AppPaths, build_paths
 from .server import LocalServer
 from .transports.adb import AdbManager
 from .transports.webcat import WebcatBridge
+from .usage import UsageStore
 
 logger = logging.getLogger("freeocs.app")
 
@@ -39,7 +40,9 @@ class Application:
         level = log_level or str(self.settings.core_get("ui", "log_level", "info"))
         setup_logging(self.paths.log_file, level)
         self.events = EventBus()
+        self.usage = UsageStore(self.paths.data_dir / "usage.json", self.settings)
         self.registry = CapabilityRegistry()
+        self.registry.set_usage(self.usage)
         self.registry.apply_bindings(self.settings.capability_bindings())
         self.adb = AdbManager(self.settings)
         self.web = WebcatBridge()
@@ -219,6 +222,7 @@ class Application:
                 "items": modules,
             },
             "events": self.events.since(0, limit=12)["events"],
+            "usage": self.usage.summary(),
         }
 
     def bridge_status(self) -> dict[str, Any]:

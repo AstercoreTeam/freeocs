@@ -24,6 +24,30 @@ def test_blanks_prompt_count() -> None:
     assert "3 行" in prompt
 
 
+def test_reading_context_is_included() -> None:
+    prompt = build_prompt(
+        {
+            "question": "According to the passage, what is the main idea?",
+            "options": ["A. one", "B. two"],
+            "question_type": "choice",
+            "context": "The full reading passage goes here.",
+        }
+    )
+    assert "The full reading passage goes here." in prompt
+    assert "补充材料" in prompt
+
+
+def test_sorting_prompt_requests_sequence() -> None:
+    prompt = build_prompt(
+        {
+            "question": "Arrange the following summaries in the order (1-6).",
+            "question_type": "matching",
+        }
+    )
+    assert "排序题" in prompt
+    assert "C A D" in prompt
+
+
 def test_parse_standard_json() -> None:
     assert parse_answer('{"answer":"B","explanation":"because"}', "choice") == ("B", "because")
     assert parse_answer('```json\n{"answer":"A"}\n```', "choice") == ("A", "")

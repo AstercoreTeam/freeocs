@@ -1,5 +1,7 @@
 # 07 应用模块设计：U校园与智慧树
 
+> 平台级实际实现（页面层级、题型矩阵、续跑状态机）见 [mods/](mods/README.md)。
+
 ## 1. 模块通用结构
 
 每个模块是一个 zip 包，遵循 `02-package-format.md`：
@@ -293,7 +295,19 @@ runAutomation 循环
 
 关于 `dubbing` / `roleplay`：原脚本通过覆盖 `getUserMedia` 注入 TTS、录制并等待评分，这已经构成一次提交。v1 按“绝不自动提交”原则不执行，改为提示用户手动完成；后续如用户明确开启“允许评分提交”再实现。
 
-### 2.9 听力/视频转写
+### 2.9 AI 网页兜底
+
+无法识别题型时：
+
+- 保存 `document.documentElement.outerHTML`、可见文本、交互元素快照和原因到 `package-data/ucampus/unsupported_pages/`；
+- 调用 `llm.chat` 生成最多 6 个动作：`click` / `set_value` / `select`；
+- 本地按 `data-freeocs-el` 执行，并过滤提交/交卷/发布/评分按钮；
+- 执行后只找安全的“下一题/下一步/继续”；找不到则停止并等待人工；
+- 失败时保留已保存页面，便于后续补选择器。
+
+设置项：`web_fallback`（默认开启）。
+
+### 2.10 听力/视频转写
 
 页面 Agent 只负责收集 URL：
 

@@ -31,10 +31,16 @@ def build_prompt(payload: dict[str, Any]) -> str:
     if context.strip():
         parts.append(f"补充材料：\n{context}")
     if question_type == "matching":
-        parts.append(
-            "这是匹配题。只输出一行字母，按单词顺序给出每个单词对应含义的字母，"
-            "用空格分隔，例如 D A B C。不要 JSON，不要编号，不要解释。"
-        )
+        if re.search(r"arrange|order|sort|排序|顺序", question, re.IGNORECASE):
+            parts.append(
+                "这是排序题。请根据文章内容，按正确顺序输出 A-F 的字母，"
+                "用空格分隔，例如 C A D F B E。不要 JSON，不要编号，不要解释。"
+            )
+        else:
+            parts.append(
+                "这是匹配题。只输出一行字母，按单词顺序给出每个单词对应含义的字母，"
+                "用空格分隔，例如 D A B C。不要 JSON，不要编号，不要解释。"
+            )
         parts.append("只输出这一行字母，不要输出任何其它文字。")
     elif question_type == "discussion":
         parts.append(
