@@ -31,10 +31,11 @@ FreeOCS（Free Open Course Study）是一个本地优先、插件化的学习助
 | [plugins/](plugins/README.md) | 按插件拆分的实现：LLM、ASR、OCR、TTS/KokoClone | 插件开发者 |
 | [08-development.md](08-development.md) | 环境、运行、构建、打包、测试、里程碑 | 开发者 |
 | [10-token-usage.md](10-token-usage.md) | Token 统计、缓存命中/未命中/输出单价、消费限额、AI 兜底确认 | 开发者/用户 |
-| [11-voice-clone.md](11-voice-clone.md) | KokoClone 本地克隆语音、参考音频设置、独立环境 | 开发者/用户 |
+| [11-voice-clone.md](11-voice-clone.md) | KokoClone 本地克隆语音、参考音频设置 | 开发者/用户 |
+| [12-models.md](12-models.md) | 模型下载、目录结构、设置页对应关系、镜像与许可 | 用户/开发者 |
 | [09-decisions.md](09-decisions.md) | 关键架构决策记录（ADR） | 所有人 |
 
-建议阅读顺序：`README → 01 → 02 → 03 → 04 → 05/06 → mods → plugins → 08 → 10 → 11`。
+建议阅读顺序：`README → 01 → 02 → 03 → 04 → 05/06 → mods → plugins → 08 → 10 → 11 → 12`。
 
 ## 3. 已确认的产品决策
 

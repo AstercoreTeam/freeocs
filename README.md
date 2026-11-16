@@ -52,7 +52,7 @@ Wayland 下若窗口异常，可尝试 `GDK_BACKEND=x11`。
 （faster-whisper、PyAV、CTranslate2、RapidOCR、ONNX Runtime、pyttsx3、
 Kokoro/Kanade、PyTorch CPU、ffmpeg 等），但**不包含任何模型权重**。
 
-模型仍由用户在设置中选择：
+模型下载与目录说明见 [docs/12-models.md](docs/12-models.md)。模型仍由用户在设置中选择：
 
 - faster-whisper 模型目录
 - Kokoro ONNX / voices
