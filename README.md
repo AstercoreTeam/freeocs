@@ -46,6 +46,22 @@ Wayland 下若窗口异常，可尝试 `GDK_BACKEND=x11`。
 - `docs/`：设计文档
 - `tests/`：测试
 
+## 分发包说明
+
+完整打包版包含本地 ASR、OCR、系统 TTS、克隆语音所需的 Python 运行时依赖
+（faster-whisper、PyAV、CTranslate2、RapidOCR、ONNX Runtime、pyttsx3、
+Kokoro/Kanade、PyTorch CPU、ffmpeg 等），但**不包含任何模型权重**。
+
+模型仍由用户在设置中选择：
+
+- faster-whisper 模型目录
+- Kokoro ONNX / voices
+- Kanade config.yaml / model.safetensors
+- 大模型 API 或本地模型配置
+- RapidOCR 自带的轻量 OCR 模型随依赖包存在
+
+打包目录约 1.9 GB，压缩包约几百 MB；如果只需要云端能力，可以使用源码版或精简包。
+
 ## 构建
 
 ```bash

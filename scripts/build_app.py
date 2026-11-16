@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import shutil
 import subprocess
 import sys
@@ -40,10 +41,35 @@ def build(onefile: bool, clean: bool, name: str) -> Path:
     ]
     if clean:
         cmd.append("--clean")
+    # Optional runtime dependencies are loaded dynamically by plugins.  Collect
+    # them explicitly so the packaged app is self-contained (models stay out).
+    optional_modules = [
+        "faster_whisper", "ctranslate2", "av", "tokenizers",
+        "onnxruntime", "rapidocr_onnxruntime", "pyttsx3",
+        "kokoro_onnx", "kanade_tokenizer",
+        "soundfile", "misaki", "vocos", "safetensors",
+        "huggingface_hub", "imageio_ffmpeg", "numpy", "PIL",
+        "yaml", "jsonargparse",
+    ]
+    for module in optional_modules:
+        try:
+            available = importlib.util.find_spec(module) is not None
+        except (ImportError, ValueError):
+            available = False
+        if available:
+            cmd.extend(["--collect-all", module])
     for relative in data_dirs:
         source = ROOT / relative
         if source.exists():
             cmd.extend(["--add-data", f"{source}{sep}{relative}"])
+    # torch is handled by PyInstaller's own hook; collecting it with
+    # --collect-all adds headers, tests and build tools that the app never uses.
+    for module in ("torch", "torchaudio"):
+        try:
+            if importlib.util.find_spec(module) is not None:
+                cmd.extend(["--hidden-import", module])
+        except (ImportError, ValueError):
+            pass
     for extra in ("README.md", "LICENSE"):
         source = ROOT / extra
         if source.exists():
@@ -54,11 +80,32 @@ def build(onefile: bool, clean: bool, name: str) -> Path:
     if result.returncode != 0:
         raise SystemExit(f"PyInstaller 失败，退出码 {result.returncode}")
     output = ROOT / "dist" / (name + (".exe" if sys.platform == "win32" else ""))
+    if not onefile:
+        trim_runtime(output)
     if onefile:
         print(f"[build] 单文件：{output}")
     else:
         print(f"[build] 目录：{ROOT / 'dist' / name}")
     return output
+
+
+def trim_runtime(output: Path) -> None:
+    """Remove files collected by PyInstaller that inference never needs."""
+    internal = output / "_internal"
+    if not internal.is_dir():
+        return
+    for relative in (
+        "torch/test", "torch/include", "torch/bin",
+        "share/icons", "share/themes", "onnxruntime/datasets",
+    ):
+        target = internal / relative
+        if target.exists():
+            shutil.rmtree(target, ignore_errors=True)
+    lib = internal / "torch" / "lib"
+    if lib.is_dir():
+        for pattern in ("*test*.so", "libaoti_custom_ops.so", "libbackend_with_compiler.so"):
+            for target in lib.glob(pattern):
+                target.unlink(missing_ok=True)
 
 
 def package_linux(name: str) -> Path:

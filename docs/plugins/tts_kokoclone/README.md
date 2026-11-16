@@ -12,8 +12,8 @@ media.tts
 
 设置 → 克隆语音（KokoClone）：
 
-- KokoClone 代码目录（包含 `core/cloner.py`）
-- KokoClone Python（含 torch / kokoro-onnx / kanade-tokenizer）
+- 运行方式：内置依赖（推荐）或外部 KokoClone Python
+- 外部方式才需要 KokoClone 代码目录和 Python
 - **参考音频：3-10 秒单人、无背景音乐的人声**
 - 语言
 - 合成超时
@@ -32,11 +32,13 @@ media.tts
 ```text
 FreeOCS
   → 校验参考音频和模型文件
-  → 写请求 JSON
-  → 调用外部 KokoClone Python
-  → KokoClone 用参考音频克隆音色
+  → 内置依赖直接加载 Kokoro + Kanade
+  → 用参考音频克隆音色
   → 读取 WAV
 ```
+
+完整打包版已经内置 torch、torchaudio、kokoro-onnx、kanade-tokenizer、
+soundfile、misaki、vocos 等运行时依赖；模型文件保持外置。
 
 ## 为什么用外部 Python
 
@@ -44,8 +46,9 @@ KokoClone 依赖 torch / torchaudio / Kanade，体积和平台差异都很大。
 
 ## 限制
 
-- 需要独立 KokoClone 环境
-- 首次使用可能下载 Kanade/Vocos 模型
+- 内置方式不再需要独立 Python 环境
+- 外部方式仍可使用独立 KokoClone 环境
+- 模型文件必须由用户选择；不会打进安装包
 - 参考音频质量决定克隆效果
 - 当前不自动裁剪参考音频
 

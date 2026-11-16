@@ -88,7 +88,13 @@ class WhisperASR:
             # before the audio is decoded.  Normalize through ffmpeg with
             # metadata stripped when available.
             transcribe_path = path
-            ffmpeg = shutil.which("ffmpeg") or "/usr/bin/ffmpeg"
+            ffmpeg = shutil.which("ffmpeg")
+            if not ffmpeg:
+                try:
+                    import imageio_ffmpeg
+                    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+                except Exception:
+                    ffmpeg = "/usr/bin/ffmpeg" if Path("/usr/bin/ffmpeg").is_file() else None
             if suffix not in {".wav"}:
                 converted = temp_dir / f"input-{uuid.uuid4().hex}.wav"
                 try:

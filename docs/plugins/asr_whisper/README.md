@@ -44,7 +44,7 @@ audio/video bytes
 
 ## 限制
 
-- 打包版未内置 faster-whisper/av；源码环境需安装
+- 完整打包版已内置 faster-whisper / av / imageio-ffmpeg；模型仍需外置
 - 首次加载模型较慢
 - 模型目录必须包含 `model.bin`
 - 没有 ffmpeg 时回退到原始文件路径，可能受容器元数据影响

@@ -26,6 +26,23 @@
       "order": 212,
       "fields": [
         {
+          "key": "engine",
+          "type": "select",
+          "label": "运行方式",
+          "default": "internal",
+          "options": [
+            {
+              "value": "internal",
+              "label": "内置依赖（推荐，模型外置）"
+            },
+            {
+              "value": "external",
+              "label": "外部 KokoClone Python"
+            }
+          ],
+          "help": "内置方式使用打包进来的 torch/KokoClone；模型文件仍需选择。外部方式用于开发机已有 KokoClone 环境。"
+        },
+        {
           "key": "kokoro_model",
           "type": "path",
           "mode": "file",

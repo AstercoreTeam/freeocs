@@ -20,7 +20,8 @@
   },
   "dependencies": [
     "faster-whisper>=1.2,<2",
-    "av>=15,<16"
+    "av>=15,<16",
+    "imageio-ffmpeg>=0.4"
   ],
   "settings": [
     {

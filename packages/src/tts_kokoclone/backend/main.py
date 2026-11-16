@@ -29,6 +29,7 @@ class KokoCloneTTS:
     def _settings(self) -> dict[str, Any]:
         get = self.api.settings.get
         return {
+            "engine": str(get("engine", "internal") or "internal").strip().lower(),
             "project_dir": str(get("project_dir", "") or "").strip(),
             "python_path": str(get("python_path", "") or "").strip(),
             "reference_audio": str(get("reference_audio", "") or "").strip(),
@@ -70,26 +71,12 @@ class KokoCloneTTS:
             raise ProviderError("TTS 文本超过 5000 字符", provider="tts_kokoclone")
 
         settings = self._settings()
-        project = Path(settings["project_dir"]).expanduser() if settings["project_dir"] else None
-        if project is None or not project.is_dir():
-            raise ProviderError(
-                "未配置 KokoClone 目录；请到设置 → 克隆语音选择包含 core/cloner.py 的项目目录。",
-                provider="tts_kokoclone",
-            )
-        if not (project / "core" / "cloner.py").is_file():
-            raise ProviderError(
-                f"KokoClone 目录无效（缺少 core/cloner.py）：{project}",
-                provider="tts_kokoclone",
-            )
         reference = Path(settings["reference_audio"]).expanduser() if settings["reference_audio"] else None
         if reference is None or not reference.is_file():
             raise ProviderError(
                 "未配置用于克隆的参考音频；请到设置 → 克隆语音选择一段 3-10 秒人声。",
                 provider="tts_kokoclone",
             )
-        python = self._python(settings, project)
-        if not Path(python).is_file():
-            raise ProviderError(f"KokoClone Python 不存在：{python}", provider="tts_kokoclone")
         lang = (language or settings["language"] or "en").lower()
         if lang not in {"en", "zh", "ja", "fr", "hi", "it", "pt", "es"}:
             lang = "en"
@@ -104,14 +91,31 @@ class KokoCloneTTS:
         for key in selected_models:
             if not Path(settings[key]).expanduser().is_file():
                 raise ProviderError(f"模型文件不存在：{settings[key]}", provider="tts_kokoclone")
-        use_external_models = bool(selected_models)
-        if use_external_models and settings["vocoder_dir"] and not Path(settings["vocoder_dir"]).expanduser().is_dir():
+        if settings["vocoder_dir"] and not Path(settings["vocoder_dir"]).expanduser().is_dir():
             raise ProviderError(f"Vocoder 目录不存在：{settings['vocoder_dir']}", provider="tts_kokoclone")
 
         output_dir = self.api.data_dir / "tts"
         output_dir.mkdir(parents=True, exist_ok=True)
         token = uuid.uuid4().hex
         output_path = output_dir / f"kokoclone-{token}.wav"
+
+        if selected_models and settings["engine"] != "external":
+            return self._synthesize_internal(text, settings, reference, lang, output_path)
+
+        project = Path(settings["project_dir"]).expanduser() if settings["project_dir"] else None
+        if project is None or not project.is_dir():
+            raise ProviderError(
+                "未配置模型文件或 KokoClone 目录；请到设置 → 克隆语音选择 Kokoro/Kanade 模型文件。",
+                provider="tts_kokoclone",
+            )
+        if not (project / "core" / "cloner.py").is_file():
+            raise ProviderError(
+                f"KokoClone 目录无效（缺少 core/cloner.py）：{project}",
+                provider="tts_kokoclone",
+            )
+        python = self._python(settings, project)
+        if not Path(python).is_file():
+            raise ProviderError(f"KokoClone Python 不存在：{python}", provider="tts_kokoclone")
         request_path = output_dir / f"kokoclone-{token}.json"
         request_path.write_text(
             json.dumps(
@@ -120,7 +124,7 @@ class KokoCloneTTS:
                     "lang": lang,
                     "reference_audio": str(reference),
                     "output_path": str(output_path),
-                    "use_external_models": use_external_models,
+                    "use_external_models": bool(selected_models),
                     "kokoro_model": settings["kokoro_model"],
                     "voices_file": settings["voices_file"],
                     "kanade_config": settings["kanade_config"],
@@ -192,6 +196,57 @@ class KokoCloneTTS:
             raise ProviderError(f"无法启动 KokoClone：{exc}", provider="tts_kokoclone") from exc
         finally:
             request_path.unlink(missing_ok=True)
+            output_path.unlink(missing_ok=True)
+
+    def _synthesize_internal(
+        self,
+        text: str,
+        settings: dict[str, Any],
+        reference: Path,
+        lang: str,
+        output_path: Path,
+    ) -> AudioResult:
+        try:
+            import torch
+            from kanade_tokenizer import KanadeModel, load_vocoder
+
+            from .kokoclone_core.cloner import KokoClone
+
+            cloner = KokoClone.__new__(KokoClone)
+            cloner.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            cloner.hf_repo = ""
+            cloner.kanade = KanadeModel.from_pretrained(
+                config_path=settings["kanade_config"],
+                weights_path=settings["kanade_weights"],
+            ).to(cloner.device).eval()
+            if settings["vocoder_dir"]:
+                from vocos import Vocos
+
+                cloner.vocoder = Vocos.from_pretrained(settings["vocoder_dir"]).eval().to(cloner.device)
+            else:
+                cloner.vocoder = load_vocoder(cloner.kanade.config.vocoder_name).to(cloner.device)
+            cloner.sample_rate = cloner.kanade.config.sample_rate
+            cloner.kokoro_cache = {}
+
+            def ensure_model(folder: str, filename: str) -> str:
+                if folder == "model":
+                    return settings["kokoro_model"]
+                if folder == "voice":
+                    return settings["voices_file"]
+                return str(Path(settings["project_dir"] or ".") / folder / filename)
+
+            cloner._ensure_file = ensure_model
+            if settings["vocab_config"]:
+                cloner._get_vocab_config = lambda _lang: settings["vocab_config"]
+            cloner.generate(text, lang, str(reference), str(output_path))
+            if not output_path.is_file() or output_path.stat().st_size <= 44:
+                raise ProviderError("KokoClone 内置合成未生成有效 WAV", provider="tts_kokoclone")
+            return AudioResult(data=output_path.read_bytes(), mime="audio/wav", ext="wav")
+        except ProviderError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise ProviderError(f"KokoClone 内置合成失败：{exc}", provider="tts_kokoclone") from exc
+        finally:
             output_path.unlink(missing_ok=True)
 
     def close(self) -> None:

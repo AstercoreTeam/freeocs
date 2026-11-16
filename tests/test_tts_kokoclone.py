@@ -28,6 +28,7 @@ def make_api(tmp_path: Path, project: Path, reference: Path):
         data_dir=tmp_path / "data",
         settings=Settings(
             {
+                "engine": "external",
                 "project_dir": str(project),
                 "python_path": sys.executable,
                 "reference_audio": str(reference),
