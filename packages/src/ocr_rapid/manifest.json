@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "api_version": 1,
+  "id": "ocr_rapid",
+  "name": "本地 OCR（RapidOCR）",
+  "version": "0.1.0",
+  "type": "plugin",
+  "description": "使用 RapidOCR 识别截图文字与坐标；可回退到 tesseract。",
+  "author": "FreeOCS",
+  "license": "MIT",
+  "entry": "main:setup",
+  "platform": "any",
+  "requires": [],
+  "provides": {
+    "media.ocr": {
+      "version": 1,
+      "title": "RapidOCR（本地）",
+      "description": "ONNX Runtime CPU 推理，返回文字与坐标"
+    }
+  },
+  "dependencies": ["rapidocr-onnxruntime>=1.4", "pillow>=10", "numpy>=1.26"],
+  "settings": [
+    {
+      "id": "ocr_rapid",
+      "title": "本地 OCR",
+      "order": 230,
+      "fields": [
+        {
+          "key": "engine",
+          "type": "select",
+          "label": "引擎",
+          "default": "auto",
+          "options": [
+            {"value": "auto", "label": "自动（RapidOCR 优先，回退 tesseract）"},
+            {"value": "rapidocr", "label": "仅 RapidOCR"},
+            {"value": "tesseract", "label": "仅 tesseract"}
+          ]
+        },
+        {
+          "key": "lang",
+          "type": "text",
+          "label": "语言",
+          "default": "ch",
+          "placeholder": "ch / en / chi_sim+eng"
+        },
+        {
+          "key": "min_confidence",
+          "type": "number",
+          "label": "最低置信度",
+          "default": 0.5,
+          "min": 0,
+          "max": 1,
+          "step": 0.05
+        }
+      ]
+    }
+  ]
+}

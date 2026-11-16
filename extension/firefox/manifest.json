@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "FreeOCS Browser Bridge",
+  "version": "0.1.0",
+  "description": "FreeOCS 本地学习助手的浏览器中继（仅连接 127.0.0.1）。",
+  "permissions": [
+    "tabs",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "scripts": [
+      "background.js"
+    ]
+  },
+  "action": {
+    "default_title": "FreeOCS Bridge"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "freeocs-bridge@local",
+      "strict_min_version": "115.0",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ]
+      }
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ]
+}

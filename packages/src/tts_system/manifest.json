@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "api_version": 1,
+  "id": "tts_system",
+  "name": "系统语音合成",
+  "version": "0.1.0",
+  "type": "plugin",
+  "description": "使用操作系统自带 TTS 引擎生成 WAV，离线可用。",
+  "author": "FreeOCS",
+  "license": "MIT",
+  "entry": "main:setup",
+  "platform": "any",
+  "requires": [],
+  "provides": {
+    "media.tts": {
+      "version": 1,
+      "title": "系统语音",
+      "description": "pyttsx3 / SAPI5 / espeak-ng"
+    }
+  },
+  "dependencies": ["pyttsx3>=2.90,<3"],
+  "settings": [
+    {
+      "id": "tts_system",
+      "title": "系统语音",
+      "order": 210,
+      "fields": [
+        {
+          "key": "voice",
+          "type": "text",
+          "label": "语音 ID",
+          "default": "",
+          "placeholder": "留空使用系统默认语音",
+          "help": "Linux 可用 espeak-ng 的语音名，Windows 可用 SAPI 语音名。"
+        },
+        {
+          "key": "rate",
+          "type": "integer",
+          "label": "语速",
+          "default": 175,
+          "min": 50,
+          "max": 400,
+          "step": 5
+        },
+        {
+          "key": "volume",
+          "type": "number",
+          "label": "音量",
+          "default": 1.0,
+          "min": 0,
+          "max": 1,
+          "step": 0.1
+        }
+      ]
+    }
+  ]
+}

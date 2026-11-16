@@ -1,0 +1,27 @@
+.wt-panel { display: flex; flex-direction: column; }
+.wt-message { font-size: 14px; color: var(--text); }
+.wt-safety {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: 12px;
+}
+.wt-log {
+  margin-top: 8px;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: var(--surface-2);
+}
+.wt-log-row {
+  display: grid;
+  grid-template-columns: 70px 1fr;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.wt-log-row:last-child { border-bottom: none; }

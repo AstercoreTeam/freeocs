@@ -1,0 +1,303 @@
+/* Main shell: navigation, page loading, header status and event polling. */
+(function () {
+  "use strict";
+
+  const state = {
+    bootstrap: null,
+    currentPage: null,
+    currentId: "",
+    params: {},
+    eventSeq: 0,
+    eventTimer: null,
+    statusTimer: null,
+    loadToken: 0,
+    pageDefs: {},
+    loadedScripts: new Set(),
+    loadedCss: new Set(),
+  };
+
+  const NAV_ICONS = {
+    home: "⌂",
+    apps: "▦",
+    guide: "?",
+    settings: "⚙",
+    logs: "≣",
+  };
+
+  function t(key, fallback) {
+    return fallback || key;
+  }
+
+  function applyTheme(theme) {
+    const value = ["light", "dark", "system"].includes(theme) ? theme : "light";
+    document.documentElement.dataset.theme = value;
+    const button = document.getElementById("btn-theme");
+    if (button) {
+      button.textContent = value === "dark" ? "浅色" : (value === "system" ? "跟随系统" : "深色");
+    }
+  }
+
+  function renderNav(items) {
+    const nav = document.getElementById("focs-nav");
+    nav.innerHTML = "";
+    (items || []).forEach((item) => {
+      const el = document.createElement("div");
+      el.className = "nav-item";
+      el.dataset.page = item.id;
+      el.innerHTML = `<span class="nav-icon">${NAV_ICONS[item.id] || "•"}</span><span class="nav-text">${UI.escapeHtml(item.title)}</span>`;
+      el.addEventListener("click", () => navigate(item.id));
+      nav.appendChild(el);
+    });
+  }
+
+  function setActiveNav(id) {
+    document.querySelectorAll("#focs-nav .nav-item").forEach((item) => {
+      item.classList.toggle("active", item.dataset.page === id);
+    });
+  }
+
+  function renderStatus() {
+    const data = state.bootstrap || {};
+    const settings = data.settings || {};
+    const bridge = data.bridge || {};
+    const llm = settings.llm || {};
+    const container = document.getElementById("global-status");
+    if (!container) return;
+    const chips = [];
+    chips.push({
+      cls: llm.configured ? "ok" : "warn",
+      text: llm.configured ? `大模型 ${llm.model || ""}` : "大模型未配置",
+      action: "settings",
+      title: llm.base_url || "点击配置大模型",
+    });
+    chips.push({
+      cls: bridge.connected ? "ok" : "",
+      text: bridge.connected ? "浏览器已连接" : "浏览器未连接",
+      action: "guide",
+      title: bridge.server || "点击查看安装指南",
+    });
+    chips.push({
+      cls: "",
+      text: "手机未检测",
+      action: "guide",
+      title: "点击查看 ADB 指南",
+    });
+    container.innerHTML = chips.map((chip) => `
+      <span class="status-chip ${chip.cls}" data-go="${chip.action}" title="${UI.escapeHtml(chip.title)}">
+        <span class="dot"></span>${UI.escapeHtml(chip.text)}
+      </span>`).join("");
+    container.querySelectorAll("[data-go]").forEach((el) => {
+      el.addEventListener("click", () => navigate(el.dataset.go));
+    });
+  }
+
+  async function refreshBridgeStatus() {
+    try {
+      const result = await API.call("get_bridge_status");
+      if (result && result.ok && state.bootstrap) {
+        state.bootstrap.bridge = result.bridge;
+        renderStatus();
+      }
+    } catch (error) {
+      console.warn("刷新浏览器状态失败", error);
+    }
+  }
+
+  function bindHeader() {
+    document.getElementById("btn-settings").addEventListener("click", () => navigate("settings"));
+    document.getElementById("btn-theme").addEventListener("click", async () => {
+      const current = document.documentElement.dataset.theme;
+      const next = current === "dark" ? "light" : "dark";
+      applyTheme(next);
+      try {
+        await API.must("save_settings", "ui", { theme: next });
+        if (state.bootstrap) state.bootstrap.ui.theme = next;
+      } catch (error) {
+        UI.toast(error.message || "主题保存失败", "error");
+      }
+    });
+    document.getElementById("btn-about").addEventListener("click", async () => {
+      const info = (state.bootstrap && state.bootstrap.app) || {};
+      await UI.modal({
+        title: "关于 FreeOCS",
+        message: `版本：${info.version || "?"}\n平台：${info.platform || "?"}\nPython：${info.python || "?"}\n数据目录：${info.data_dir || "?"}\n设置目录：${info.config_dir || "?"}\n\n本地优先 · 插件化 · 绝不自动提交`,
+        confirmText: "知道了",
+        cancelText: "关闭",
+      });
+    });
+  }
+
+  function loadScript(src) {
+    if (state.loadedScripts.has(src)) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = src;
+      script.onload = () => {
+        state.loadedScripts.add(src);
+        resolve();
+      };
+      script.onerror = () => reject(new Error(`脚本加载失败：${src}`));
+      document.body.appendChild(script);
+    });
+  }
+
+  function loadCss(href) {
+    if (state.loadedCss.has(href)) return;
+    state.loadedCss.add(href);
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = href;
+    document.head.appendChild(link);
+  }
+
+  async function loadPage(id, params) {
+    const token = ++state.loadToken;
+    if (state.currentPage && typeof state.currentPage.destroy === "function") {
+      try { state.currentPage.destroy(); } catch (error) { console.warn(error); }
+    }
+    state.currentPage = null;
+    state.currentId = id;
+    state.params = params || {};
+    setActiveNav(id === "module" ? "apps" : id);
+
+    const content = document.getElementById("page-content");
+    content.innerHTML = '<div class="page-loading"><span class="spinner"></span> 正在加载…</div>';
+    try {
+      await loadScript(`pages/${id}/page.js`);
+      loadCss(`pages/${id}/page.css`);
+      const response = await fetch(`pages/${id}/index.html`, { cache: "no-store" });
+      if (!response.ok) throw new Error(`页面不存在：pages/${id}/index.html`);
+      const html = await response.text();
+      if (token !== state.loadToken) return;
+      content.innerHTML = html;
+      const definition = state.pageDefs[id];
+      if (!definition) throw new Error(`页面未注册：${id}`);
+      if (typeof definition.init === "function") {
+        const instance = await definition.init(state.params, content);
+        if (token !== state.loadToken) {
+          if (instance && typeof instance.destroy === "function") instance.destroy();
+          return;
+        }
+        state.currentPage = instance || definition;
+      } else {
+        state.currentPage = definition;
+      }
+    } catch (error) {
+      console.error(error);
+      content.innerHTML = `<div class="focs-page"><div class="card">${UI.empty(error.message || "页面加载失败", "!")}</div></div>`;
+    }
+  }
+
+  function parseHash() {
+    const raw = (location.hash || "").replace(/^#\/?/, "");
+    if (!raw) return null;
+    const parts = raw.split("/").filter(Boolean);
+    if (!parts.length) return null;
+    if (parts[0] === "module" && parts[1]) {
+      return { id: "module", params: { id: decodeURIComponent(parts[1]) } };
+    }
+    const known = ["home", "apps", "guide", "settings", "logs"];
+    if (known.includes(parts[0])) return { id: parts[0], params: {} };
+    return null;
+  }
+
+  function navigate(id, params = {}) {
+    const nextParams = params || {};
+    const hash = id === "module" && nextParams.id
+      ? `#/module/${encodeURIComponent(nextParams.id)}`
+      : `#/${id}`;
+    if (location.hash === hash) {
+      loadPage(id, nextParams);
+      return;
+    }
+    location.hash = hash;
+    // hashchange will trigger loadPage
+  }
+
+  async function boot() {
+    try {
+      const result = await API.call("get_bootstrap");
+      if (!result || result.ok !== true) {
+        throw new Error((result && result.error) || "无法读取启动信息");
+      }
+      state.bootstrap = result;
+      state.eventSeq = result.last_seq || 0;
+      applyTheme((result.ui && result.ui.theme) || "light");
+      renderNav(result.nav || []);
+      bindHeader();
+      renderStatus();
+
+      const route = parseHash();
+      const startPage = (result.ui && result.ui.start_page) || "home";
+      if (route) {
+        await loadPage(route.id, route.params);
+      } else {
+        await loadPage(["home", "apps", "guide"].includes(startPage) ? startPage : "home", {});
+      }
+      startEventPolling();
+      state.statusTimer = window.setInterval(refreshBridgeStatus, 8000);
+    } catch (error) {
+      console.error(error);
+      document.getElementById("page-content").innerHTML = `
+        <div class="focs-page"><div class="card">
+          <h1 class="page-title">启动失败</h1>
+          <p class="page-subtitle">${UI.escapeHtml(error.message || String(error))}</p>
+          <p class="form-help">请查看终端日志，或重新启动应用。</p>
+        </div></div>`;
+    }
+  }
+
+  function startEventPolling() {
+    if (state.eventTimer) window.clearInterval(state.eventTimer);
+    state.eventTimer = window.setInterval(async () => {
+      if (document.hidden) return;
+      try {
+        const result = await API.call("get_events", state.eventSeq, 200);
+        if (!result || result.ok !== true) return;
+        state.eventSeq = result.last_seq || state.eventSeq;
+        const events = result.events || [];
+        if (events.length) {
+          document.dispatchEvent(new CustomEvent("focs:events", { detail: events }));
+        }
+      } catch (error) {
+        console.warn("事件轮询失败", error);
+      }
+    }, 900);
+  }
+
+  window.addEventListener("hashchange", () => {
+    const route = parseHash();
+    if (route) loadPage(route.id, route.params);
+  });
+
+  window.definePage = function (id, definition) {
+    state.pageDefs[id] = definition;
+  };
+
+  window.App = {
+    navigate,
+    toast: UI.toast,
+    get params() { return state.params; },
+    get bootstrap() { return state.bootstrap; },
+    get currentId() { return state.currentId; },
+    reloadBootstrap: async () => {
+      const result = await API.call("get_bootstrap");
+      if (result && result.ok) {
+        state.bootstrap = result;
+        renderStatus();
+      }
+      return result;
+    },
+    refreshStatus: renderStatus,
+    formatTime: UI.formatTime,
+    escape: UI.escapeHtml,
+    openPath: (path) => API.must("open_path", path),
+    openExternal: (url) => API.must("open_external", url),
+  };
+
+  if (window.pywebview && window.pywebview.api) {
+    boot();
+  } else {
+    window.addEventListener("pywebviewready", boot, { once: true });
+  }
+})();

@@ -1,0 +1,30 @@
+.uca-panel { display: flex; flex-direction: column; }
+.uca-message { font-size: 14px; color: var(--text); }
+.uca-safety {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: 12px;
+}
+.uca-log {
+  margin-top: 8px;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: var(--surface-2);
+}
+.uca-log-row {
+  display: grid;
+  grid-template-columns: 70px 1fr;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.uca-log-row:last-child { border-bottom: none; }
+.uca-log-row.error { color: var(--danger); }
+.uca-log-row.warn { color: var(--warning); }
+.uca-log-row.success { color: var(--success); }

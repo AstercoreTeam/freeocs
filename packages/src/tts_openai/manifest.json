@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "api_version": 1,
+  "id": "tts_openai",
+  "name": "云端语音合成（OpenAI 兼容）",
+  "version": "0.1.0",
+  "type": "plugin",
+  "description": "调用 OpenAI 兼容 /audio/speech 生成 MP3/WAV。",
+  "author": "FreeOCS",
+  "license": "MIT",
+  "entry": "main:setup",
+  "platform": "any",
+  "requires": [],
+  "provides": {
+    "media.tts": {
+      "version": 1,
+      "title": "OpenAI 兼容 TTS",
+      "description": "gpt-4o-mini-tts / tts-1 等"
+    }
+  },
+  "dependencies": ["httpx>=0.27,<1"],
+  "settings": [
+    {
+      "id": "tts_openai",
+      "title": "云端语音合成",
+      "order": 211,
+      "fields": [
+        {"key": "base_url", "type": "text", "label": "API 地址", "default": "https://api.openai.com/v1", "required": true},
+        {"key": "api_key", "type": "password", "label": "API Key", "default": ""},
+        {"key": "model", "type": "text", "label": "模型", "default": "gpt-4o-mini-tts", "required": true},
+        {"key": "voice", "type": "text", "label": "语音", "default": "alloy"},
+        {"key": "format", "type": "select", "label": "输出格式", "default": "mp3", "options": [{"value": "mp3", "label": "MP3"}, {"value": "wav", "label": "WAV"}]},
+        {"key": "timeout", "type": "number", "label": "超时（秒）", "default": 300, "min": 5, "max": 1800, "step": 5}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "api_version": 1,
+  "id": "llm_openai",
+  "name": "OpenAI 兼容大模型",
+  "version": "0.1.0",
+  "type": "plugin",
+  "description": "调用任意 OpenAI 兼容的 /chat/completions 文本模型，使用全局大模型设置。",
+  "author": "FreeOCS",
+  "license": "MIT",
+  "entry": "main:setup",
+  "platform": "any",
+  "requires": [],
+  "provides": {
+    "llm.chat": {
+      "version": 1,
+      "title": "OpenAI 兼容文本模型",
+      "description": "DeepSeek / OpenAI / Ollama / vLLM / LM Studio 等"
+    }
+  },
+  "dependencies": ["httpx>=0.27,<1"],
+  "settings": []
+}

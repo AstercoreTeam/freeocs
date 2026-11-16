@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "api_version": 1,
+  "id": "asr_whisper",
+  "name": "本地语音转写（faster-whisper）",
+  "version": "0.1.0",
+  "type": "plugin",
+  "description": "使用本地 faster-whisper 模型转写音频，离线可用。",
+  "author": "FreeOCS",
+  "license": "MIT",
+  "entry": "main:setup",
+  "platform": "any",
+  "requires": [],
+  "provides": {
+    "media.asr": {
+      "version": 1,
+      "title": "faster-whisper（本地）",
+      "description": "CPU/GPU 本地转写"
+    }
+  },
+  "dependencies": ["faster-whisper>=1.2,<2", "av>=13"],
+  "settings": [
+    {
+      "id": "asr_whisper",
+      "title": "本地语音转写",
+      "order": 220,
+      "fields": [
+        {
+          "key": "model_dir",
+          "type": "path",
+          "mode": "dir",
+          "label": "模型目录",
+          "default": "",
+          "help": "留空使用 <data>/models/faster-whisper-base；目录内需有 model.bin。"
+        },
+        {
+          "key": "device",
+          "type": "select",
+          "label": "设备",
+          "default": "cpu",
+          "options": [
+            {"value": "cpu", "label": "CPU"},
+            {"value": "cuda", "label": "CUDA"}
+          ]
+        },
+        {
+          "key": "compute_type",
+          "type": "select",
+          "label": "计算精度",
+          "default": "int8",
+          "options": [
+            {"value": "int8", "label": "int8"},
+            {"value": "float16", "label": "float16"},
+            {"value": "float32", "label": "float32"}
+          ]
+        },
+        {
+          "key": "language",
+          "type": "text",
+          "label": "语言",
+          "default": "",
+          "placeholder": "留空自动检测；例如 en / zh"
+        },
+        {
+          "key": "vad_filter",
+          "type": "boolean",
+          "label": "静音过滤",
+          "default": true
+        },
+        {
+          "key": "max_bytes",
+          "type": "integer",
+          "label": "最大音频字节数",
+          "default": 209715200,
+          "min": 1048576,
+          "max": 536870912,
+          "step": 1048576,
+          "advanced": true
+        }
+      ]
+    }
+  ]
+}

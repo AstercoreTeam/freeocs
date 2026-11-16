@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "api_version": 1,
+  "id": "asr_openai",
+  "name": "云端语音转写（OpenAI 兼容）",
+  "version": "0.1.0",
+  "type": "plugin",
+  "description": "调用 OpenAI 兼容 /audio/transcriptions 转写音频。",
+  "author": "FreeOCS",
+  "license": "MIT",
+  "entry": "main:setup",
+  "platform": "any",
+  "requires": [],
+  "provides": {
+    "media.asr": {
+      "version": 1,
+      "title": "OpenAI 兼容 ASR",
+      "description": "Whisper API 等"
+    }
+  },
+  "dependencies": ["httpx>=0.27,<1"],
+  "settings": [
+    {
+      "id": "asr_openai",
+      "title": "云端语音转写",
+      "order": 221,
+      "fields": [
+        {"key": "base_url", "type": "text", "label": "API 地址", "default": "https://api.openai.com/v1", "required": true},
+        {"key": "api_key", "type": "password", "label": "API Key", "default": ""},
+        {"key": "model", "type": "text", "label": "模型", "default": "whisper-1", "required": true},
+        {"key": "language", "type": "text", "label": "语言", "default": "", "placeholder": "留空自动检测"},
+        {"key": "timeout", "type": "number", "label": "超时（秒）", "default": 300, "min": 5, "max": 1800, "step": 5}
+      ]
+    }
+  ]
+}

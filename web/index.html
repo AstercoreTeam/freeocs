@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FreeOCS - 学习助手</title>
+  <link rel="stylesheet" href="vendor/layui/css/layui.css">
+  <link rel="stylesheet" href="css/theme.css">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div class="focs-app">
+  <header class="focs-header">
+    <div class="focs-brand">
+      <div class="focs-logo">F</div>
+      <div class="focs-brand-text">
+        <strong>FreeOCS</strong>
+        <small>本地学习助手</small>
+      </div>
+    </div>
+
+    <div class="focs-status" id="global-status" aria-label="全局状态"></div>
+
+    <div class="focs-actions">
+      <button class="btn btn-ghost btn-sm" id="btn-theme" title="切换主题">深色</button>
+      <button class="btn btn-ghost btn-sm" id="btn-settings" title="设置">设置</button>
+      <button class="btn btn-ghost btn-sm" id="btn-about" title="关于">关于</button>
+    </div>
+  </header>
+
+  <div class="focs-body">
+    <nav class="focs-nav" id="focs-nav" aria-label="主导航"></nav>
+    <main class="focs-main" id="page-content" role="main">
+      <div class="page-loading"><span class="spinner"></span> 正在加载…</div>
+    </main>
+  </div>
+</div>
+
+<div class="toast-stack" id="toast-stack" aria-live="polite"></div>
+<div class="modal-root" id="modal-root"></div>
+
+<script src="vendor/layui/layui.js"></script>
+<script src="js/api.js"></script>
+<script src="js/components.js"></script>
+<script src="js/settings.js"></script>
+<script src="js/module.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

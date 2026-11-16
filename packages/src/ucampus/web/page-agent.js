@@ -1,0 +1,2485 @@
+(function () {
+  "use strict";
+
+  if (globalThis.__freeocs_ucampus_loaded__) return;
+  globalThis.__freeocs_ucampus_loaded__ = true;
+  try { document.documentElement.dataset.freeocsUcampus = "1"; } catch (error) {}
+
+  // The portal tab also matches *.unipus.cn, but it must not compete with the
+  // course tab for the single automation client slot.
+  if (location.hostname === "ucloud.unipus.cn") return;
+
+  const RUN_STATE_KEY = "ucampusAssistantRunState";
+  const COURSE_START_KEY = "ucampusAssistantPendingCourseStart";
+  function gmGet(key, fallback) {
+    try {
+      const raw = localStorage.getItem(`freeocs:ucampus:${key}`);
+      return raw === null ? fallback : JSON.parse(raw);
+    } catch (_) {
+      return fallback;
+    }
+  }
+
+  function gmSet(key, value) {
+    try {
+      const storageKey = `freeocs:ucampus:${key}`;
+      if (value === null || value === undefined) localStorage.removeItem(storageKey);
+      else localStorage.setItem(storageKey, JSON.stringify(value));
+    } catch (_) {
+      // localStorage may be unavailable in private mode.
+    }
+  }
+
+  const CLIENT_ID_KEY = "ucampusAssistantClientId";
+  const CLIENT_ID = gmGet(CLIENT_ID_KEY, "") || (() => {
+    const id = `ucampus-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    gmSet(CLIENT_ID_KEY, id);
+    return id;
+  })();
+  let audioBlob = null;
+  let automationRunning = false;
+  let pendingNavigation = false;
+  let actionAdvanced = false;
+  const submittedSteps = new Set();
+  let automationIntro = "";
+  let courseStartAttempted = false;
+  let controllerPolling = false;
+  let manualStop = false;
+  let backendConnected = false;
+  let currentStatus = "已连接，等待控制台";
+  let runState = loadRunState();
+
+  function loadRunState() {
+    const saved = gmGet(RUN_STATE_KEY, {});
+    return {
+      completed: Number.isInteger(saved.completed) ? saved.completed : 0,
+      entries: Array.isArray(saved.entries) ? saved.entries.slice(-12) : [],
+    };
+  }
+
+  function updateRunLog(message, type = "info", countAnswer = false) {
+    if (countAnswer) runState.completed += 1;
+    runState.entries.push({
+      time: new Date().toLocaleTimeString(),
+      message,
+      type,
+    });
+    runState.entries = runState.entries.slice(-12);
+    gmSet(RUN_STATE_KEY, runState);
+    renderRunLog();
+    void request("/api/automation/log", {
+      message,
+      level: type,
+      page_url: location.href,
+      page_title: document.title,
+    }).catch((error) => console.warn("[UCampus Assistant] 无法同步执行日志", error));
+  }
+
+  function renderRunLog() {
+    // The FreeOCS UI owns the log view; the page agent is headless.
+  }
+
+  function modulePath(path) {
+    const map = {
+      "/api/answer": "/api/module/ucampus/answer",
+      "/api/transcribe": "/api/module/ucampus/transcribe",
+      "/api/transcribe-url": "/api/module/ucampus/transcribe-url",
+      "/api/speech": "/api/module/ucampus/tts",
+      "/api/listen": "/api/module/ucampus/listen",
+    };
+    if (map[path]) return map[path];
+    if (path.startsWith("/api/automation/")) {
+      return `/api/module/ucampus/${path.slice("/api/automation/".length)}`;
+    }
+    return path;
+  }
+
+  function base64ToBlob(base64, mime) {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return new Blob([bytes], { type: mime || "application/octet-stream" });
+  }
+
+  async function request(path, body, responseType = "json") {
+    try {
+      const response = await __freeocs.request(modulePath(path), {
+        method: "POST",
+        body: body || {},
+      });
+      if (responseType === "blob") {
+        if (!response || !response.audio_base64) throw new Error("语音合成未返回音频");
+        return base64ToBlob(response.audio_base64, response.mime || "audio/mpeg");
+      }
+      return response;
+    } catch (error) {
+      throw new Error(error && error.message ? error.message : String(error));
+    }
+  }
+
+  function visible(element) {
+    return Boolean(element && (element.offsetWidth || element.offsetHeight || element.getClientRects().length));
+  }
+
+  function controlVisible(element) {
+    return visible(element) || [...(element.labels || [])].some(visible) ||
+      visible(element.closest("label"));
+  }
+
+  function pageDocuments() {
+    const docs = [document];
+    for (let index = 0; index < docs.length; index += 1) {
+      const root = docs[index];
+      for (const element of root.querySelectorAll("*")) {
+        if (element.shadowRoot && !docs.includes(element.shadowRoot)) {
+          docs.push(element.shadowRoot);
+        }
+        if (element.tagName !== "IFRAME") continue;
+        try {
+          if (element.contentDocument?.body && !docs.includes(element.contentDocument)) {
+            docs.push(element.contentDocument);
+          }
+        } catch (_) {
+          // Cross-origin frames run their own userscript instance.
+        }
+      }
+    }
+    return docs;
+  }
+
+  const AUDIO_TRANSCRIPT_CACHE = new Map();
+  const PAGE_TRANSCRIPT_CACHE = new Map();
+  const VIDEO_TRANSCRIPT_CACHE = new Map();
+
+  function audioSources() {
+    const found = new Map();
+    for (const doc of pageDocuments()) {
+      for (const element of doc.querySelectorAll("audio, audio source, [src]")) {
+        const raw = element.currentSrc || element.src || element.getAttribute("src");
+        if (!raw || raw.startsWith("blob:") || raw.startsWith("data:")) continue;
+        if (!/\.(?:mp3|wav|m4a|aac|ogg|flac)(?:[?#]|$)/i.test(raw) &&
+          !/\/audio\//i.test(raw)) continue;
+        try {
+          const absolute = new URL(raw, doc.baseURI || location.href).href.split("#")[0];
+          found.set(absolute, true);
+        } catch (_) {
+          // Ignore malformed media URLs.
+        }
+      }
+    }
+    return [...found.keys()];
+  }
+
+  function fetchAudioBuffer(url) {
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method: "GET",
+        url,
+        responseType: "arraybuffer",
+        timeout: 180000,
+        onload: (response) => {
+          if (response.status >= 200 && response.status < 300 && response.response) {
+            resolve(response.response);
+          } else {
+            reject(new Error(`HTTP ${response.status}`));
+          }
+        },
+        onerror: () => reject(new Error("音频下载失败。")),
+        ontimeout: () => reject(new Error("音频下载超时。")),
+      });
+    });
+  }
+
+  function arrayBufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    const chunk = 0x8000;
+    let binary = "";
+    for (let index = 0; index < bytes.length; index += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(index, index + chunk));
+    }
+    return btoa(binary);
+  }
+
+  async function transcribeAudioUrl(url) {
+    if (AUDIO_TRANSCRIPT_CACHE.has(url)) return AUDIO_TRANSCRIPT_CACHE.get(url);
+    const response = await request("/api/transcribe-url", {
+      url,
+      referer: location.href,
+    });
+    const text = (response?.text || "").trim();
+    AUDIO_TRANSCRIPT_CACHE.set(url, text);
+    return text;
+  }
+
+  function pageAudioTranscripts(maxSources = 3, maxCount = 2) {
+    const sources = audioSources();
+    if (!sources.length || sources.length > maxSources) return Promise.resolve([]);
+    return (async () => {
+      const parts = [];
+      for (const url of sources.slice(0, maxCount)) {
+        try {
+          parts.push(await transcribeAudioUrl(url) || "");
+        } catch (error) {
+          console.warn("[UCampus Assistant] 音频转写失败", url, error);
+          updateRunLog(`音频转写失败：${error.message}`, "error");
+          parts.push("");
+        }
+      }
+      return parts;
+    })();
+  }
+
+  function pageAudioTranscript() {
+    return pageAudioTranscripts().then((parts) =>
+      parts.filter((text) => text).join("\n").trim()
+    );
+  }
+
+  async function transcribeVideoAudio(video) {
+    if (!video) return "";
+    const source = video.currentSrc || video.src || "";
+    if (/^https?:/i.test(source)) {
+      try {
+        updateRunLog("尝试直接下载视频并转写", "info");
+        const response = await request("/api/transcribe-url", {
+          url: source,
+          referer: location.href,
+        });
+        if (response?.text) return response.text.trim();
+      } catch (error) {
+        updateRunLog(`视频地址转写失败：${error.message}`, "error");
+      }
+    }
+    if (typeof video.captureStream !== "function" ||
+      typeof MediaRecorder === "undefined") return "";
+    let stream = null;
+    try {
+      video.muted = false;
+      video.volume = 1;
+      await video.play();
+      await wait(1500);
+      updateRunLog(
+        `视频状态：${video.paused ? "暂停" : "播放中"} ${Math.round(video.currentTime)}s / ` +
+        `${Number.isFinite(video.duration) ? Math.round(video.duration) : "?"}s`,
+        "info"
+      );
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (AudioContextClass) {
+        const context = new AudioContextClass();
+        if (context.state === "suspended") await context.resume();
+        const source = context.createMediaElementSource(video);
+        const destination = context.createMediaStreamDestination();
+        source.connect(destination);
+        source.connect(context.destination);
+        stream = destination.stream;
+      } else {
+        stream = video.captureStream();
+      }
+    } catch (error) {
+      console.warn("[UCampus Assistant] 视频音轨捕获失败", error);
+      try {
+        stream = video.captureStream();
+      } catch (_) {
+        return "";
+      }
+    }
+    const tracks = stream.getAudioTracks ? stream.getAudioTracks() : [];
+    if (!tracks.length) {
+      updateRunLog("视频没有可用音轨，改用系统录音", "info");
+      return "";
+    }
+    const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+      ? "audio/webm;codecs=opus"
+      : "audio/webm";
+    try {
+      const recorder = new MediaRecorder(stream, { mimeType: mime });
+      const chunks = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size) chunks.push(event.data);
+      };
+      const stopped = new Promise((resolve) => { recorder.onstop = resolve; });
+      recorder.start(1000);
+      const duration = Math.min(
+        120,
+        Number.isFinite(video.duration) && video.duration > 0
+          ? Math.ceil(video.duration) + 1
+          : 60
+      );
+      updateRunLog(`正在录制视频音频约 ${duration} 秒`, "info");
+      await wait(duration * 1000);
+      recorder.stop();
+      await stopped;
+      const blob = new Blob(chunks, { type: mime });
+      if (blob.size < 1000) return "";
+      const buffer = await blob.arrayBuffer();
+      const response = await request("/api/transcribe", {
+        audio_base64: arrayBufferToBase64(buffer),
+        filename: "video.webm",
+        language: "",
+      });
+      return (response?.text || "").trim();
+    } catch (error) {
+      console.warn("[UCampus Assistant] 视频音频转写失败", error);
+      return "";
+    }
+  }
+
+  async function recordPageAudioTranscript(seconds = 15) {
+    for (const doc of pageDocuments()) {
+      for (const audio of doc.querySelectorAll("audio")) {
+        try {
+          await audio.play();
+        } catch (_) {
+          // Autoplay may be blocked; playback can be started manually.
+        }
+      }
+      for (const play of doc.querySelectorAll(
+        "[class*='audio'] [class*='play'], [class*='audio-player'], [class*='play-icon']"
+      )) {
+        try {
+          play.click();
+        } catch (_) {
+          // Ignore non-clickable decorations.
+        }
+      }
+    }
+    const response = await request("/api/listen", {
+      seconds,
+      source: "loopback",
+    });
+    return (response?.text || "").trim();
+  }
+
+  function questionForDocument(doc) {
+    const selectors = [
+      "[data-question]",
+      "[class*='question-content']",
+      "[class*='questionContent']",
+      "[class*='question-stem']",
+      "[class*='questionStem']",
+      "[class*='question-title']",
+      "[class*='questionTitle']",
+      "[class*='ques-title']",
+    ];
+    const candidates = [...doc.querySelectorAll(selectors.join(","))]
+      .filter((element) => visible(element) && !element.closest("#uca-panel"))
+      .map((element) => element.innerText?.trim() || "")
+      .filter((text) => text.length >= 12 && text.length <= 12000);
+    if (candidates.length) return candidates[0];
+
+    const root = doc.querySelector("main, article, [class*='content'], [class*='Content']") || doc.body || doc;
+    const clone = root.cloneNode(true);
+    clone.querySelectorAll(
+      "#uca-panel, script, style, nav, header, footer, aside, button, [role='button'], " +
+      "[class*='nav'], [class*='menu'], [class*='sidebar'], [class*='catalog'], " +
+      "[class*='directory'], [class*='video'], [class*='player'], [class*='tab']"
+    ).forEach((element) => element.remove());
+    const text = clone.innerText?.trim() || "";
+    return text.length >= 12 ? text.slice(0, 12000) : "";
+  }
+
+  const answeredChoiceKeys = new Set();
+
+  function choiceGroupKey(group) {
+    return `${location.href}|${group.stem}|${group.options.map((option) => option.text).join("|")}`;
+  }
+
+  function optionChoiceGroups(doc) {
+    return [...doc.querySelectorAll(".question-common-abs-choice")]
+      .filter((group) => visible(group) && !group.closest("#uca-panel"))
+      .map((group) => {
+        const options = [...group.querySelectorAll(".option")]
+          .filter((option) => visible(option))
+          .map((option, index) => ({
+            input: option,
+            text: (option.querySelector(".content")?.innerText || option.innerText || "")
+              .trim().slice(0, 500),
+            caption: option.querySelector(".caption")?.innerText?.trim() ||
+              String.fromCharCode(65 + index),
+          }))
+          .filter((option) => option.text);
+        return {
+          element: group,
+          stem: group.querySelector(".ques-title")?.innerText?.trim() || "",
+          options,
+        };
+      })
+      .filter((group) => group.options.length >= 2);
+  }
+
+  const answeredDropdownKeys = new Set();
+
+  function dropdownKey(item) {
+    return `${location.href}|${item.stem}|${item.options.join("|")}`;
+  }
+
+  function optionDropdowns(doc) {
+    return [...doc.querySelectorAll(".scoop-select-wrapper")]
+      .filter((wrapper) => visible(wrapper) && !wrapper.closest("#uca-panel"))
+      .map((wrapper, index) => {
+        const trigger = wrapper.querySelector(".ant-dropdown-trigger");
+        const textElement = wrapper.querySelector(".user-answer-text");
+        const optionHost = wrapper.querySelector("div[style*='visibility: hidden']");
+        const options = optionHost
+          ? [...optionHost.querySelectorAll("i")]
+            .map((item) => (item.textContent || item.innerText || "").trim())
+            .filter(Boolean)
+          : [];
+        const paragraph = wrapper.closest("p");
+        const stem = (paragraph?.innerText || `第 ${index + 1} 空`)
+          .replace((textElement?.innerText || "").trim(), "")
+          .trim();
+        return { element: wrapper, trigger, textElement, options, stem, index };
+      })
+      .filter((item) => item.trigger && item.options.length >= 2);
+  }
+
+  function currentQuestion() {
+    const selected = window.getSelection()?.toString().trim();
+    if (selected) return selected.slice(0, 12000);
+    if (isCourseDetailPage()) return "";
+    for (const doc of pageDocuments()) {
+      const dropdowns = optionDropdowns(doc);
+      if (!dropdowns.length) continue;
+      const pending = dropdowns.find((item) =>
+        !answeredDropdownKeys.has(dropdownKey(item))
+      );
+      return pending ? pending.stem : "";
+    }
+    for (const doc of pageDocuments()) {
+      const groups = optionChoiceGroups(doc);
+      if (!groups.length) continue;
+      const pending = groups.find((group) => !answeredChoiceKeys.has(choiceGroupKey(group)));
+      return pending ? pending.stem : "";
+    }
+    for (const doc of pageDocuments()) {
+      const text = questionForDocument(doc);
+      if (text) return text;
+    }
+    return "";
+  }
+
+  function answerControls() {
+    const docs = pageDocuments();
+    for (const doc of docs) {
+      const anyFileInput = doc.querySelector("input[type='file']");
+      const pageText = (doc.body?.innerText || "").slice(0, 1200);
+      if (anyFileInput &&
+        /Speaking task|上传音频|record your conversation|upload your recording/i.test(pageText)) {
+        return { type: "oral", audioInput: anyFileInput, doc };
+      }
+      const uploadInput = [...doc.querySelectorAll("input[type='file']")]
+        .find((element) => {
+          const accept = (element.getAttribute("accept") || "").toLowerCase();
+          return /audio|video|mp3|wav|mpeg|mp4/.test(accept) ||
+            element.closest("[class*='upload']");
+        });
+      if (uploadInput &&
+        /Speaking task|上传音频|将音频|录音|record your conversation/i.test(pageText)) {
+        return { type: "oral", audioInput: uploadInput, doc };
+      }
+      if (/Start role-play/i.test(pageText)) {
+        return { type: "roleplay", doc };
+      }
+      const radios = [...doc.querySelectorAll("input[type='radio'], [role='radio']")]
+        .filter((element) => controlVisible(element) && !element.closest("#uca-panel"));
+      if (radios.length >= 2) {
+        const groups = new Set(
+          radios.map((radio) => radio.name || radio.getAttribute("name") || "default")
+        );
+        if (groups.size > 1) {
+          return { type: "unsupported", reason: "页面同时包含多个选择题选项组。" };
+        }
+        const options = radios.map((input, index) => {
+          const label = input.labels?.[0] || input.closest("label");
+          const text = label?.innerText?.trim() || input.getAttribute("aria-label") ||
+            input.parentElement?.innerText?.trim() || input.value || `选项 ${index + 1}`;
+          return { input, text: text.slice(0, 500) };
+        });
+        if (options.some((option) => !option.text)) {
+          return { type: "unsupported", reason: "无法读取完整的选择题选项文本。" };
+        }
+        return { type: "choice", options, doc };
+      }
+
+      const dropdowns = optionDropdowns(doc);
+      if (dropdowns.length) {
+        const pending = dropdowns.find((item) =>
+          !answeredDropdownKeys.has(dropdownKey(item))
+        );
+        if (!pending) {
+          return { type: "unsupported", reason: "本页下拉题已全部作答。" };
+        }
+        return {
+          type: "dropdown",
+          options: pending.options.map((text) => ({ text })),
+          dropdown: pending,
+          dropdowns,
+          doc,
+        };
+      }
+
+      const choiceGroups = optionChoiceGroups(doc);
+      if (choiceGroups.length) {
+        const group = choiceGroups.find((item) =>
+          !answeredChoiceKeys.has(choiceGroupKey(item))
+        );
+        if (!group) {
+          return { type: "unsupported", reason: "本页选择题已全部作答。" };
+        }
+        return {
+          type: "choice",
+          options: group.options,
+          group,
+          groups: choiceGroups,
+          doc,
+        };
+      }
+
+      const recordButtons = [...doc.querySelectorAll(".button-record, .record-icon")]
+        .filter((button) =>
+          button.getClientRects().length > 0 && !button.closest("#uca-panel")
+        )
+        .filter((button, index, list) =>
+          !list.some((other, otherIndex) =>
+            otherIndex !== index && other.contains(button)
+          )
+        );
+      if (recordButtons.length) {
+        const items = recordButtons.map((button, index) => {
+          let item = button.closest(".item");
+          if (!item) {
+            let parent = button.parentElement;
+            for (let depth = 0; depth < 4 && parent; depth += 1) {
+              const value = (parent.innerText || "").trim();
+              if (value.length > 5 && value.length < 400) {
+                item = parent;
+                break;
+              }
+              parent = parent.parentElement;
+            }
+          }
+          const explicit = item?.querySelector(
+            ".component-htmlview p, [class*='sentence'], [class*='content'] p"
+          )?.innerText;
+          let text = (explicit || item?.innerText || "").trim();
+          text = text.split(/\n+/)
+            .map((line) => line.trim())
+            .filter((line) => line &&
+              !/^(播放|录音|重录|评分|朗读|麦克风|录音中|停止)$/.test(line))
+            .join(" ")
+            .replace(/\s+/g, " ")
+            .trim();
+          if (text.length > 300) text = text.slice(0, 300);
+          return { button, item, text, index };
+        });
+        if (items.every((item) => !item.text || /^第 \d+ 句$/.test(item.text))) {
+          return { type: "unsupported", reason: "无法提取朗读句子文本。", doc };
+        }
+        return { type: "dubbing", items, doc };
+      }
+
+      const sortable = doc.querySelector(".sortable-list-wrapper");
+      if (sortable) {
+        const words = [...sortable.querySelectorAll(".sortable-list-question-no")]
+          .map((element) => (element.innerText || "").trim())
+          .filter(Boolean);
+        const meanings = [...sortable.querySelectorAll(".sequence-reply-view-item-text")]
+          .map((element) => {
+            const text = (element.innerText || "").trim();
+            const match = /^([A-Z])[.、]/.exec(text);
+            return {
+              element,
+              label: match ? match[1] : "",
+              text,
+            };
+          })
+          .filter((item) => item.label);
+        if (words.length >= 2 && meanings.length === words.length) {
+          return { type: "matching", words, meanings, wrapper: sortable, doc };
+        }
+      }      const fields = [...doc.querySelectorAll(
+        ".question-inputbox-input, .fe-scoop input, .comp-abs-input input, " +
+        "textarea[placeholder], input[placeholder], " +
+        "[contenteditable='true'][data-placeholder]"
+      )].filter((element) => {
+        if (!visible(element) || element.closest("#uca-panel")) return false;
+        const hint = [
+          element.className,
+          element.getAttribute("placeholder"),
+          element.getAttribute("data-placeholder"),
+          element.getAttribute("aria-label"),
+        ].join(" ").toLowerCase();
+        return element.matches(
+          ".question-inputbox-input, .fe-scoop input, .comp-abs-input input"
+        ) || /answer|response|blank|答案|作答|回答/.test(hint);
+      });
+      if (fields.length === 1) return { type: "blank", fields, doc };
+      if (fields.length > 1) {
+        const essays = fields.every((field) => field.tagName === "TEXTAREA");
+        if (essays) return { type: "essays", fields, doc };
+        return { type: "blanks", fields, doc };
+      }
+
+      const audioInput = [...doc.querySelectorAll("input[type='file']")]
+        .find((element) => visible(element) && /audio|wav|mp3|mpeg/i.test(element.accept || ""));
+      if (audioInput) return { type: "oral", audioInput, doc };
+    }
+    return { type: "unsupported", reason: "未检测到支持的选择题、单个填空框或音频上传控件。" };
+  }
+
+  function videoForAutomation() {
+    const videos = pageDocuments().flatMap((doc) =>
+      [...doc.querySelectorAll("video")].filter((video) =>
+        visible(video) && (
+          video.currentSrc || video.src || video.querySelector("source[src]")
+        )
+      )
+    );
+    if (videos.length > 1) {
+      return { error: "当前页面检测到多个可见视频，无法确定应播放哪一个。" };
+    }
+    return { video: videos[0] || null };
+  }
+
+  function setStatus(text, error = false) {
+    currentStatus = error ? `失败：${text}` : text;
+  }
+
+  async function reportUnknown(question, reason) {
+    const payload = {
+      question: question || "(未能提取题目文本)",
+      reason,
+      page_title: document.title,
+      page_url: location.href,
+    };
+    try {
+      await request("/api/automation/unrecognized", payload);
+    } catch (error) {
+      console.error("[UCampus Assistant] 无法记录未识别题目", payload, error);
+      setStatus(`未识别：${reason}；写入日志失败：${error.message}`, true);
+      return false;
+    }
+    updateRunLog(`无法继续：${reason}`, "error");
+    setStatus(`未识别题目，已记录：${reason}\n${payload.question.slice(0, 240)}`, true);
+    console.warn("[UCampus Assistant] 未识别题目", payload);
+    return true;
+  }
+
+  function writeText(element, value) {
+    if (element.isContentEditable) element.textContent = value;
+    else {
+      const prototype = element instanceof HTMLTextAreaElement
+        ? HTMLTextAreaElement.prototype
+        : HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+      if (setter) setter.call(element, value);
+      else element.value = value;
+    }
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  async function dragSortable(source, target) {
+    const sourceRect = source.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const startX = sourceRect.left + sourceRect.width / 2;
+    const startY = sourceRect.top + sourceRect.height / 2;
+    const endX = targetRect.left + targetRect.width / 2;
+    const endY = targetRect.top + targetRect.height / 2;
+    const transfer = new DataTransfer();
+    transfer.setData("text/plain", "drag");
+    transfer.effectAllowed = "move";
+    const fire = (element, type, x, y) => element.dispatchEvent(new DragEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer: transfer,
+      clientX: x,
+      clientY: y,
+    }));
+    fire(source, "dragstart", startX, startY);
+    await wait(120);
+    fire(target, "dragenter", endX, endY);
+    fire(target, "dragover", endX, endY);
+    await wait(120);
+    fire(target, "drop", endX, endY);
+    fire(source, "dragend", endX, endY);
+    await wait(350);
+
+    source.dispatchEvent(new MouseEvent("mousedown", {
+      bubbles: true, cancelable: true, button: 0,
+      clientX: startX, clientY: startY,
+    }));
+    for (let step = 1; step <= 8; step += 1) {
+      const x = startX + ((endX - startX) * step) / 8;
+      const y = startY + ((endY - startY) * step) / 8;
+      document.dispatchEvent(new MouseEvent("mousemove", {
+        bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y,
+      }));
+      await wait(60);
+    }
+    target.dispatchEvent(new MouseEvent("mouseup", {
+      bubbles: true, cancelable: true, button: 0,
+      clientX: endX, clientY: endY,
+    }));
+    await wait(350);
+  }
+
+  async function applyAnswer(answer, controls) {
+    if (controls.type === "matching") {
+      let letters = [];
+      try {
+        const parsed = JSON.parse(answer.trim());
+        if (Array.isArray(parsed)) letters = parsed.map((item) => String(item).trim().toUpperCase());
+      } catch (_) {
+        letters = (answer.match(/[A-Z]/g) || []);
+      }
+      const desired = letters
+        .map((letter) => controls.meanings.find((item) => item.label === letter))
+        .filter(Boolean);
+      if (desired.length !== controls.meanings.length) {
+        throw new Error(`模型返回 ${desired.length} 个匹配，页面有 ${controls.meanings.length} 项。`);
+      }
+      const wrapper = controls.wrapper;
+      for (let index = 0; index < desired.length; index += 1) {
+        const current = [...wrapper.querySelectorAll(".sequence-reply-view-item-text")];
+        if (current[index] === desired[index].element) continue;
+        await dragSortable(desired[index].element, current[index]);
+      }
+      const finalOrder = [...wrapper.querySelectorAll(".sequence-reply-view-item-text")]
+        .map((element) => (element.innerText || "").trim());
+      const expectedOrder = desired.map((item) => item.text);
+      if (finalOrder.join("|") !== expectedOrder.join("|")) {
+        throw new Error(`拖拽排序未生效，实际顺序：${finalOrder.join(" / ")}`);
+      }
+      updateRunLog(`匹配顺序已调整：${letters.join(",")}`, "info");
+      return;
+    }
+    if (controls.type === "dropdown") {
+      const pending = controls.dropdown;
+      const normalized = answer.trim();
+      const letterMatch = /^([A-Za-z])[.)、\s]?$/.exec(normalized);
+      const optionIndex = letterMatch
+        ? letterMatch[1].toUpperCase().charCodeAt(0) - 65
+        : -1;
+      const optionText = optionIndex >= 0
+        ? pending.options[optionIndex]
+        : pending.options.find((text) =>
+          normalized.toLowerCase().includes(text.toLowerCase()) ||
+          text.toLowerCase().includes(normalized.toLowerCase())
+        );
+      if (!optionText) throw new Error("模型答案无法与下拉选项匹配。");
+      pending.trigger.click();
+      await wait(400);
+      const menuItems = pageDocuments().flatMap((doc) => [
+        ...doc.querySelectorAll(
+          ".ant-dropdown li, .ant-dropdown-menu-item, [role='option'], .ant-select-item-option"
+        ),
+      ]).filter(visible);
+      const target = menuItems.find((item) =>
+        (item.innerText || "").trim() === optionText
+      ) || menuItems.find((item) =>
+        (item.innerText || "").includes(optionText)
+      );
+      if (target) {
+        target.click();
+      } else {
+        const hiddenOption = [...pending.element.querySelectorAll("i")]
+          .find((item) => (item.innerText || "").trim() === optionText);
+        if (!hiddenOption) throw new Error("下拉选项未能展开或未找到匹配项。");
+        hiddenOption.click();
+      }
+      await wait(300);
+      if ((pending.textElement?.innerText || "").trim() === "点击选择") {
+        throw new Error("下拉选项未能选中。");
+      }
+      answeredDropdownKeys.add(dropdownKey(pending));
+      return;
+    }
+    if (controls.type === "choice") {
+      const normalized = answer.trim().toLocaleLowerCase();
+      const matched = controls.options.find((option, index) => {
+        const optionText = option.text.toLocaleLowerCase();
+        const letter = String.fromCharCode(97 + index);
+        return normalized === letter || new RegExp(`^${letter}[.)、\\s]`).test(normalized) ||
+          normalized.includes(optionText);
+      });
+      if (!matched) throw new Error("模型答案无法与页面选项匹配。");
+      if (matched.input.matches("[role='radio']") || matched.input.matches(".option")) {
+        matched.input.click();
+      } else {
+        matched.input.checked = true;
+      }
+      matched.input.dispatchEvent(new Event("input", { bubbles: true }));
+      matched.input.dispatchEvent(new Event("change", { bubbles: true }));
+      if (controls.group) answeredChoiceKeys.add(choiceGroupKey(controls.group));
+      return;
+    }
+    if (controls.type === "blank") {
+      if (!answer.trim()) throw new Error("模型未返回可填入的答案。");
+      writeText(controls.fields[0], answer.trim());
+      return;
+    }
+    if (controls.type === "blanks") {
+      let values = [];
+      try {
+        const parsed = JSON.parse(answer.trim());
+        if (Array.isArray(parsed)) values = parsed;
+      } catch (_) {
+        // Fall back to a separated list below.
+      }
+      if (!values.length) {
+        values = answer.split(/\s*(?:\||\n|,|;|，|；)\s*/).filter((item) => item.trim());
+      }
+      if (values.length > controls.fields.length) {
+        values = values.slice(0, controls.fields.length);
+      }
+      if (values.length !== controls.fields.length) {
+        throw new Error(`模型返回 ${values.length} 个答案，页面有 ${controls.fields.length} 个空。`);
+      }
+      controls.fields.forEach((field, index) => {
+        writeText(field, String(values[index]).trim());
+      });
+      return;
+    }
+    throw new Error("此题型不能直接回填答案。");
+  }
+
+  async function attachReferenceAudio(audioInput) {
+    throw new Error("参考录音模式未启用，请使用语音合成");
+  }
+
+  async function attachGeneratedAudio(audioInput, text) {
+    const blob = await request("/api/speech", {
+      text,
+      output_format: "mp3",
+    }, "blob");
+    const extension = blob.type.includes("wav") ? "wav" : "mp3";
+    const mime = blob.type || (extension === "wav" ? "audio/wav" : "audio/mpeg");
+    const file = new File([blob], `assistant-answer.${extension}`, { type: mime });
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    try {
+      audioInput.files = transfer.files;
+    } catch (error) {
+      throw new Error(`无法写入上传控件：${error.message}`);
+    }
+    audioInput.dispatchEvent(new Event("input", { bubbles: true }));
+    audioInput.dispatchEvent(new Event("change", { bubbles: true }));
+    audioBlob = blob;
+    await wait(1200);
+    const count = audioInput.files?.length || 0;
+    updateRunLog(
+      `已生成音频 ${Math.round(blob.size / 1024)} KB，写入上传框文件数：${count}`,
+      "info"
+    );
+    if (count === 0) {
+      throw new Error("上传框没有接收到音频文件。");
+    }
+  }
+
+  async function playVideoToEnd(video) {
+    if (video.ended || (Number.isFinite(video.duration) &&
+      video.duration > 0 && video.currentTime >= video.duration - 0.5)) {
+      return true;
+    }
+    setStatus("正在播放课程视频；播放完成后继续下一步…");
+    try {
+      const playback = video.play();
+      if (playback && typeof playback.then === "function") await playback;
+    } catch (error) {
+      throw new Error(`视频无法自动播放（可能被浏览器拦截）：${error.message}`);
+    }
+
+    return new Promise((resolve, reject) => {
+      const timer = setInterval(() => {
+        if (!automationRunning) {
+          clearInterval(timer);
+          resolve(false);
+          return;
+        }
+        if (video.error) {
+          clearInterval(timer);
+          reject(new Error("视频播放失败或媒体加载出错。"));
+          return;
+        }
+        if (video.ended || (Number.isFinite(video.duration) &&
+          video.duration > 0 && video.currentTime >= video.duration - 0.5)) {
+          clearInterval(timer);
+          resolve(true);
+        }
+      }, 500);
+    });
+  }
+
+  function nextQuestionButton() {
+    const matcher = /^(下一题|下一步|下一页|下一节|下一课|继续学习|继续|完成并继续|next(?:\s+(?:question|step|lesson))?|continue)\s*[>›→]?$/i;
+    for (const doc of pageDocuments()) {
+      const buttons = [...doc.querySelectorAll(
+        "button, a, [role='button'], [class*='next'], [class*='Next']"
+      )]
+        .filter((element) => visible(element) && !element.closest("#uca-panel"));
+      const button = buttons.find((element) => {
+        const text = (element.innerText || element.getAttribute("aria-label") ||
+          element.getAttribute("title") || "").trim();
+        const isNextByClass = /(?:^|[\s_-])next(?:[\s_-]|$)/i.test(element.className || "");
+        return (matcher.test(text) || (!text && isNextByClass)) && !element.disabled &&
+          element.getAttribute("aria-disabled") !== "true";
+      });
+      if (button) return button;
+    }
+    return null;
+  }
+
+  function practiceTabs(doc) {
+    return [...doc.querySelectorAll(
+        "[role='tab'], button, [role='button'], [class*='tab'], [class*='Tab'], [class*='radio-button-wrapper'], [class*='sub-tab'], [class*='subTab']"
+      )].filter((element) =>
+        visible(element) && !element.closest("#uca-panel") &&
+        !element.matches("[class*='taskItemContainer']") &&
+        !element.closest(".ant-collapse-header, [class*='collapse-header']")
+      );
+  }
+
+  function practiceTab() {
+    for (const doc of pageDocuments()) {
+      const tabs = practiceTabs(doc);
+      const practice = tabs.find((element) =>
+        (element.innerText || element.getAttribute("aria-label") || "")
+          .trim().toLowerCase() === "practice"
+      );
+      if (!practice) continue;
+      let active = false;
+      let ancestor = practice;
+      for (let depth = 0; ancestor && depth < 4; depth += 1, ancestor = ancestor.parentElement) {
+        const className = typeof ancestor.className === "string" ? ancestor.className : "";
+        active ||= ancestor.getAttribute("aria-selected") === "true" ||
+          ancestor.getAttribute("aria-current") === "page" ||
+          /\b(?:active|selected|current)\b|tabActive|tabItemActive|pc-header-tab-activity|pc-header-task-activity|pc-menu-activity|ant-tabs-tab-active|ant-radio-button-wrapper-checked/i.test(className);
+        const siblings = [...(ancestor.parentElement?.children || [])];
+        const miniLecture = siblings.find((sibling) =>
+          sibling !== ancestor &&
+          (sibling.innerText || "").trim().toLowerCase() === "mini-lecture"
+        );
+        if (miniLecture) {
+          const miniClass = typeof miniLecture.className === "string" ? miniLecture.className : "";
+          const miniActive = miniLecture.getAttribute("aria-selected") === "true" ||
+            miniLecture.getAttribute("aria-current") === "page" ||
+            /\b(?:active|selected|current)\b|tabActive|tabItemActive|pc-header-tab-activity|pc-header-task-activity|pc-menu-activity|ant-tabs-tab-active|ant-radio-button-wrapper-checked/i.test(miniClass);
+          if (miniActive) active = false;
+        }
+        if (active) break;
+      }
+      if (
+        [practice, practice.closest("[role='tab'], .ant-tabs-tab")]
+          .filter(Boolean)
+          .some((element) =>
+          element.getAttribute("aria-selected") === "true" ||
+          element.getAttribute("aria-current") === "page" ||
+          /\b(?:active|selected|current)\b|tabActive|tabItemActive|pc-header-tab-activity|pc-header-task-activity|pc-menu-activity|ant-tabs-tab-active|ant-radio-button-wrapper-checked/i.test(
+            typeof element.className === "string" ? element.className : ""
+          ))
+      ) active = true;
+      return active ? null : practice;
+    }
+    return null;
+  }
+
+  function tabElementActive(element) {
+    let node = element;
+    for (let depth = 0; node && depth < 5; depth += 1, node = node.parentElement) {
+      const className = typeof node.className === "string" ? node.className : "";
+      if (node.getAttribute("aria-selected") === "true" ||
+        node.getAttribute("aria-current") === "page" ||
+        node.getAttribute("aria-current") === "true" ||
+        /(?:^|[\s_-])(?:active|selected|current)(?:$|[\s_-])|tabActive|tabItemActive|pc-header-tab-activity|pc-header-task-activity|pc-menu-activity|ant-tabs-tab-active|ant-radio-button-wrapper-checked/i
+          .test(className)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function contentTabs() {
+    if (isCourseDetailPage()) return [];
+    for (const doc of pageDocuments()) {
+      const width = window.innerWidth || 1200;
+      const seen = new Set();
+      const tabs = [];
+      for (const element of practiceTabs(doc)) {
+        const text = (element.innerText || element.getAttribute("aria-label") ||
+          element.getAttribute("title") || "").trim().replace(/\s+/g, " ");
+        if (!text || text.length > 60) continue;
+        if (/^Module\s+\d+$/i.test(text)) continue;
+        if (/^(教程学习|作业|考核方案|综合成绩|学习报告|补充资源)$/.test(text)) continue;
+        const rect = element.getBoundingClientRect();
+        if (rect.top < 0 || rect.top > 280) continue;
+        if (rect.left > width * 0.75 || rect.left < 0) continue;
+        const className = typeof element.className === "string" ? element.className : "";
+        if (element.getAttribute("role") !== "tab" &&
+          !/(?:tab|radio-button-wrapper|sub-tab|subTab)/i.test(className)) continue;
+        if (element.querySelector(
+          "[role='tab'], [class*='tabItemContainer'], [class*='tabItem'], " +
+          "[class*='pc-tab-view-container'], [class*='pc-header-tab'], " +
+          "[class*='ant-tabs-nav']"
+        )) continue;
+        const key = text;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        tabs.push({
+          element,
+          label: text,
+          top: rect.top,
+          left: rect.left,
+          active: tabElementActive(element),
+        });
+      }
+      if (tabs.length >= 2) {
+        const filtered = tabs.filter((tab) => !tabs.some((other) =>
+          other !== tab && other.label &&
+          tab.label.includes(other.label) && tab.element.contains(other.element)
+        ));
+        return filtered.sort((left, right) => left.top - right.top || left.left - right.left);
+      }
+    }
+    return [];
+  }
+
+  function nextReadingTab() {
+    const labels = ["Pre-reading", "Reading in detail", "Reading comprehension"];
+    const onReadingSection = pageDocuments().some((doc) =>
+      [...doc.querySelectorAll("[class*='pc-header-tab']")].some((element) =>
+        (element.innerText || "").trim() === "Cultural reading" &&
+        tabElementActive(element)
+      )
+    );
+    if (!onReadingSection) return null;
+    for (const doc of pageDocuments()) {
+      const found = [];
+      for (const element of doc.querySelectorAll("div, span, button, a, li")) {
+        const text = (element.innerText || "").trim();
+        if (!labels.includes(text)) continue;
+        if (element.querySelector("div, span, button, a, li")) continue;
+        if (!element.getClientRects().length) continue;
+        if (found.some((item) => item.label === text)) continue;
+        found.push({ element, label: text, active: tabElementActive(element) });
+      }
+      if (found.length < 2) continue;
+      updateRunLog(
+        `阅读二级 Tab：${found.map((item) => `${item.label}${item.active ? "*" : ""}`).join(" | ")}`,
+        "info"
+      );
+      const index = found.findIndex((item) => item.active);
+      if (index >= 0 && index + 1 < found.length) {
+        return {
+          element: found[index + 1].element,
+          label: found[index + 1].label,
+          sectionTab: true,
+        };
+      }
+    }
+    return null;
+  }
+
+  function nextNestedTab() {
+    for (const doc of pageDocuments()) {
+      const tabs = [...doc.querySelectorAll(".ant-tabs-tab")]
+        .filter((element) => visible(element) && !element.closest("#uca-panel"))
+        .map((element) => ({
+          element,
+          label: (element.innerText || "").trim().replace(/\s+/g, " "),
+          active: /ant-tabs-tab-active/i.test(
+            typeof element.className === "string" ? element.className : ""
+          ) || element.getAttribute("aria-selected") === "true",
+        }))
+        .filter((tab) => tab.label && tab.label.length <= 40);
+      if (tabs.length < 2) continue;
+      updateRunLog(
+        `二级 Tab：${tabs.map((tab) => `${tab.label}${tab.active ? "*" : ""}`).join(" | ")}`,
+        "info"
+      );
+      const index = tabs.findIndex((tab) => tab.active);
+      if (index >= 0 && index + 1 < tabs.length) {
+        return {
+          element: tabs[index + 1].element,
+          label: tabs[index + 1].label,
+          sectionTab: true,
+        };
+      }
+    }
+    return null;
+  }
+
+  function nextSpeakingTask() {
+    for (const doc of pageDocuments()) {
+      const text = doc.body?.innerText || "";
+      if (!/Read the conversation about/i.test(text)) continue;
+      const target = [...doc.querySelectorAll("div, span, a, button")]
+        .filter((element) => visible(element) &&
+          !element.closest("#uca-panel") &&
+          (element.innerText || "").trim() === "Speaking task" &&
+          !element.querySelector("div, span, a, button"))
+        .sort((left, right) =>
+          left.getBoundingClientRect().top - right.getBoundingClientRect().top
+        )[0];
+      if (target) {
+        return { element: target, label: "Speaking task", sectionTab: true };
+      }
+    }
+    return null;
+  }
+
+  function menuLevels() {
+    const viewportWidth = window.innerWidth || 1200;
+    const levels = { 1: [], 2: [], 3: [], 4: [] };
+    const content = [];
+    for (const doc of pageDocuments()) {
+      const candidates = [...doc.querySelectorAll(
+        "[role='tab'], [class*='tab'], .pc-menu-node-name, .pc-slider-menu-micro"
+      )];
+      for (const element of candidates) {
+        if (!visible(element) || element.closest("#uca-panel")) continue;
+        const label = (element.innerText || "").trim().replace(/\s+/g, " ");
+        if (!label || label.length > 40) continue;
+        if (/^Module\s+\d+$/i.test(label)) continue;
+        if (/^(目录|笔记)$/.test(label)) continue;
+        if (element.querySelector(
+          "[role='tab'], [class*='tab'], .pc-menu-node-name, .pc-slider-menu-micro"
+        )) continue;
+        const rect = element.getBoundingClientRect();
+        if (!rect.width || !rect.height) continue;
+        const item = {
+          element,
+          label,
+          top: rect.top,
+          left: rect.left,
+          active: tabElementActive(element),
+        };
+        if (rect.left > viewportWidth * 0.6 ||
+          element.closest("aside, [class*='sider'], [class*='slider'], .sidebar")) {
+          levels[1].push({ ...item, level: 1 });
+        } else if (rect.top < 320) {
+          content.push(item);
+        }
+      }
+    }
+
+    const rows = [];
+    for (const item of content) {
+      let row = rows.find((candidate) => Math.abs(candidate.top - item.top) <= 14);
+      if (!row) {
+        row = { top: item.top, items: [] };
+        rows.push(row);
+      }
+      row.items.push(item);
+    }
+    rows.sort((left, right) => left.top - right.top);
+    rows.forEach((row, index) => {
+      const level = Math.min(4, index + 2);
+      for (const item of row.items) {
+        levels[level].push({ ...item, level });
+      }
+    });
+
+    for (const level of [1, 2, 3, 4]) {
+      levels[level].sort((left, right) =>
+        left.top - right.top || left.left - right.left
+      );
+    }
+    return levels;
+  }
+
+  function nextMenuTarget() {
+    const levels = menuLevels();
+    const activeLevel = [4, 3, 2, 1].find((level) =>
+      levels[level].some((item) => item.active)
+    ) || 0;
+    if (!activeLevel) return null;
+    for (let level = activeLevel; level >= 2; level -= 1) {
+      const items = levels[level];
+      const index = items.findIndex((item) => item.active);
+      if (index >= 0 && index + 1 < items.length) {
+        const next = items[index + 1];
+        return { element: next.element, label: next.label, sectionTab: true };
+      }
+    }
+    return null;
+  }
+
+  function nextSectionTab() {
+    const speaking = nextSpeakingTask();
+    if (speaking) return speaking;
+    const reading = nextReadingTab();
+    if (reading) return reading;
+    const nested = nextNestedTab();
+    if (nested) return nested;
+    const menu = nextMenuTarget();
+    if (menu) return menu;
+    const tabs = contentTabs();
+    if (tabs.length < 2) return null;
+    updateRunLog(
+      `检测到子板块：${tabs.map((tab) => `${tab.label}${tab.active ? "*" : ""}`).join(" | ")}`,
+      "info"
+    );
+    const rows = [];
+    for (const tab of tabs) {
+      let row = rows.find((item) => Math.abs(item.top - tab.top) <= 12);
+      if (!row) {
+        row = { top: tab.top, tabs: [] };
+        rows.push(row);
+      }
+      row.tabs.push(tab);
+    }
+    rows.sort((left, right) => left.top - right.top);
+    for (const row of rows) {
+      row.tabs.sort((left, right) => left.left - right.left);
+    }
+
+    let activeRowIndex = -1;
+    let activeIndex = -1;
+    for (let index = rows.length - 1; index >= 0; index -= 1) {
+      const found = rows[index].tabs.findIndex((tab) => tab.active);
+      if (found >= 0) {
+        activeRowIndex = index;
+        activeIndex = found;
+        break;
+      }
+    }
+    if (activeRowIndex < 0 || activeIndex < 0) return null;
+
+    const activeTab = rows[activeRowIndex].tabs[activeIndex];
+    for (let rowIndex = activeRowIndex; rowIndex >= 0; rowIndex -= 1) {
+      const row = rows[rowIndex];
+      let index = rowIndex === activeRowIndex
+        ? activeIndex
+        : row.tabs.findIndex((tab) => tab.active);
+      if (index < 0) {
+        index = -1;
+        for (let candidate = 0; candidate < row.tabs.length; candidate += 1) {
+          if (row.tabs[candidate].left <= activeTab.left + 5) index = candidate;
+        }
+      }
+      if (index >= 0 && index + 1 < row.tabs.length) {
+        const next = row.tabs[index + 1];
+        return { element: next.element, label: next.label, sectionTab: true };
+      }
+    }
+    return null;
+  }
+
+  function practiceTabState() {
+    const exists = pageDocuments().some((doc) =>
+      practiceTabs(doc).some((element) =>
+        (element.innerText || element.getAttribute("aria-label") || "")
+          .trim().toLowerCase() === "practice"
+      )
+    );
+    if (!exists) return "";
+    return practiceTab() ? "mini-lecture" : "practice";
+  }
+
+  function courseTasks() {
+    return pageDocuments().flatMap((doc) =>
+      [...doc.querySelectorAll("[class*='taskItemContainer']")]
+        .filter((element) => visible(element) && !element.closest("#uca-panel"))
+        .map((element) => ({
+          element,
+          label: element.querySelector("[class*='taskTypeName']")?.innerText
+            ?.trim().replace(/\s+/g, " ").slice(0, 120) ||
+            element.innerText?.trim()
+              .replace(/\s+(?:必修|选修)?\s*(?:已完成|已通过|已掌握|未开始|未完成|进行中|学习中|待开始|待学习|继续学习)\s*$/, "")
+              .replace(/\s+/g, " ").slice(0, 120) || "",
+          status: element.querySelector(
+            "[class*='taskStateContainer'], [class*='nodePassStateTip']"
+          )?.innerText?.trim() || element.innerText?.trim() || "",
+        }))
+        .filter((task) => task.label)
+    );
+  }
+
+  function isCourseDetailPage() {
+    return /\/app\/cmgt\/resource-detail\/?/i.test(location.pathname);
+  }
+
+  function moduleTabs() {
+    return pageDocuments().flatMap((doc) =>
+      [...doc.querySelectorAll("[class*='tabItemContainer'], [role='tab']")]
+        .filter((element) =>
+          visible(element) && !element.closest("#uca-panel") &&
+          /^Module\s+\d+$/i.test((element.innerText || "").trim())
+        )
+    );
+  }
+
+  function isActiveModuleTab(tab) {
+    const className = typeof tab.className === "string" ? tab.className : "";
+    return tab.getAttribute("aria-selected") === "true" ||
+      /\b(?:active|selected|current)\b|tabActive/i.test(className);
+  }
+
+  function unfinishedTasks(tasks) {
+    return tasks.filter((task) =>
+      !/已完成|已通过|已掌握/.test(task.status) &&
+      /未开始|未完成|进行中|学习中|待开始|待学习|继续学习/.test(task.status)
+    );
+  }
+
+  async function activateModuleTab(tab) {
+    if (isActiveModuleTab(tab)) return;
+    const label = (tab.innerText || "").trim();
+    tab.click();
+    for (let retry = 0; retry < 30; retry += 1) {
+      await wait(200);
+      const current = moduleTabs().find((item) =>
+        (item.innerText || "").trim() === label
+      );
+      if (current && isActiveModuleTab(current)) {
+        await wait(200);
+        return;
+      }
+    }
+    throw new Error(`切换到${label}失败，未能确认模块内容已更新。`);
+  }
+
+  async function findUnfinishedCourseTask() {
+    const labels = moduleTabs().map((tab) => (tab.innerText || "").trim());
+    if (!labels.length) {
+      const unfinished = unfinishedTasks(courseTasks());
+      return unfinished.find((task) => /进行中|学习中/.test(task.status)) ||
+        unfinished[0] || null;
+    }
+
+    let firstUnstarted = null;
+    let scannedTasks = 0;
+    for (const label of labels) {
+      const tab = moduleTabs().find((item) =>
+        (item.innerText || "").trim() === label
+      );
+      if (!tab) throw new Error(`课程目录中未找到${label}。`);
+      await activateModuleTab(tab);
+      const tasks = await waitForCourseTasks();
+      scannedTasks += tasks.length;
+      const unfinished = unfinishedTasks(tasks);
+      const inProgress = unfinished.find((task) => /进行中|学习中/.test(task.status));
+      if (inProgress) {
+        return {
+          ...inProgress,
+          module: label,
+        };
+      }
+      if (!firstUnstarted && unfinished[0]) {
+        firstUnstarted = {
+          ...unfinished[0],
+          module: label,
+        };
+      }
+    }
+    if (scannedTasks === 0) {
+      throw new Error("课程目录已切换，但 5 秒内没有读到任何任务；页面可能仍在加载，请稍后重试。");
+    }
+    return firstUnstarted;
+  }
+
+  async function waitForCourseTasks(timeoutMs = 5000) {
+    const signature = () => courseTasks()
+      .map((task) => `${task.label}|${task.status}`)
+      .join("\n");
+    let last = signature();
+    let stable = 0;
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      await wait(250);
+      const current = signature();
+      if (current && current === last) {
+        stable += 1;
+        if (stable >= 2) return courseTasks();
+      } else {
+        stable = 0;
+        last = current;
+      }
+    }
+    return courseTasks();
+  }
+
+  function consumePendingCourseStart() {
+    const pending = gmGet(COURSE_START_KEY, null);
+    if (!pending) return false;
+    if (isCourseDetailPage()) {
+      if (!Number.isFinite(pending.createdAt) ||
+        Date.now() - pending.createdAt > 120000) {
+        gmSet(COURSE_START_KEY, null);
+      }
+      return false;
+    }
+    gmSet(COURSE_START_KEY, null);
+    if (!Number.isFinite(pending.createdAt) ||
+      Date.now() - pending.createdAt > 120000) return false;
+    return true;
+  }
+
+  async function startFromCourseDetail() {
+    if (!isCourseDetailPage() || courseStartAttempted) return;
+    courseStartAttempted = true;
+    try {
+      setStatus("正在扫描各模块的未完成课程…");
+      const target = await findUnfinishedCourseTask();
+      if (!target) {
+        const message = "课程目录中没有检测到未完成项目。";
+        setStatus(message);
+        updateRunLog(message);
+        return;
+      }
+
+      const label = `${target.module ? `${target.module} · ` : ""}${target.label}`;
+      const previousQuestion = currentQuestion();
+      setStatus(`找到未完成项目：${label}，正在打开…`);
+      gmSet(COURSE_START_KEY, {
+        createdAt: Date.now(),
+        sourceUrl: location.href,
+        label,
+      });
+      target.element.click();
+
+      for (let retry = 0; retry < 60; retry += 1) {
+        await wait(500);
+        if (!isCourseDetailPage() || courseTasks().length === 0 ||
+          answerControls().type !== "unsupported" || videoForAutomation().video) {
+          gmSet(COURSE_START_KEY, null);
+          automationIntro = `自动定位到未完成项目：${label}`;
+          await runAutomation();
+          return;
+        }
+      }
+
+      gmSet(COURSE_START_KEY, null);
+      const message = `已找到“${label}”，但点击后未检测到课程学习页面；自动流程已停止。`;
+      setStatus(message, true);
+      updateRunLog(message, "error");
+      await reportUnknown(previousQuestion || label, message);
+    } catch (error) {
+      gmSet(COURSE_START_KEY, null);
+      const message = `查找未完成课程失败：${error.message}`;
+      setStatus(message, true);
+      updateRunLog(message, "error");
+      console.error("[UCampus Assistant] 无法定位未完成课程", error);
+    }
+  }
+
+  function activeCourseTask(tasks) {
+    const activeNode = pageDocuments().flatMap((doc) =>
+      [...doc.querySelectorAll("[class*='ipublishNode_1'], [aria-current='step'], [aria-current='page']")]
+    ).find((element) => visible(element) && !element.closest("#uca-panel"));
+    if (activeNode) {
+      const selectedTask = activeNode.matches("[class*='taskItemContainer']")
+        ? activeNode
+        : activeNode.closest("[class*='taskItemContainer']") ||
+          activeNode.querySelector("[class*='taskItemContainer']");
+      const match = tasks.findIndex((task) => task.element === selectedTask);
+      if (match >= 0) return match;
+    }
+
+    const highlighted = tasks.filter((task) => {
+      const background = getComputedStyle(task.element).backgroundColor;
+      return background === "rgb(245, 247, 250)" || background === "rgb(245, 245, 245)";
+    });
+    return highlighted.length === 1
+      ? tasks.findIndex((task) => task === highlighted[0])
+      : -1;
+  }
+
+  function nextCourseTask() {
+    const tasks = courseTasks();
+    const currentIndex = activeCourseTask(tasks);
+    if (currentIndex < 0 || currentIndex + 1 >= tasks.length) return null;
+    return tasks[currentIndex + 1];
+  }
+
+  function looksLikeQuestion(text) {
+    return /[?？]\s*(?:$|\n)|_{2,}|（\s*\）|\(\s*\)|选择(?:正确|最佳|最合适)|填入(?:正确|合适)|which of the following|choose the (?:correct|best)|select the (?:correct|best)|complete the sentence/i
+      .test(text);
+  }
+
+  function currentStepKey() {
+    const video = videoForAutomation().video;
+    const tasks = courseTasks();
+    const taskIndex = activeCourseTask(tasks);
+    const task = tasks[taskIndex]?.label || "";
+    const content = currentQuestion();
+    const media = video
+      ? video.currentSrc || video.src || video.querySelector("source[src]")?.src || ""
+      : "";
+    return [location.href, task, practiceTabState(), media, content].join("|").slice(0, 16000);
+  }
+
+  function nextLearningTarget(preferCatalog = false) {
+    const sectionTab = nextSectionTab();
+    if (sectionTab) return sectionTab;
+    const practice = practiceTab();
+    if (!preferCatalog && practice) return { element: practice, label: "Practice" };
+    if (preferCatalog) {
+      const catalog = nextCatalogSection();
+      if (catalog) return { element: catalog.element, label: catalog.label, catalog: true };
+    }
+    const nextButton = nextQuestionButton();
+    if (!preferCatalog && nextButton) {
+      const label = (nextButton.innerText || nextButton.getAttribute("aria-label") ||
+        nextButton.getAttribute("title") || "下一题").trim();
+      return { element: nextButton, label };
+    }
+    const catalog = nextCatalogSection();
+    if (catalog) return { element: catalog.element, label: catalog.label, catalog: true };
+    const task = isCourseDetailPage() ? nextCourseTask() : null;
+    if (task) return { element: task.element, label: task.label, task: true };
+    return null;
+  }
+
+  const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+  function dismissBlockingDialog() {
+    for (const doc of pageDocuments()) {
+      const labels = new Set(["我知道了", "知道了"]);
+      const interactive = [...doc.querySelectorAll("button, [role='button'], a")]
+        .filter((element) => visible(element) && !element.closest("#uca-panel"))
+        .find((element) => labels.has((element.innerText || "").trim()));
+      if (interactive) {
+        interactive.click();
+        return true;
+      }
+      const fallback = [...doc.querySelectorAll("div, span")]
+        .filter((element) => visible(element) && !element.closest("#uca-panel"))
+        .find((element) => {
+          const text = (element.textContent || "").trim();
+          if (!labels.has(text)) return false;
+          return ![...element.children].some((child) =>
+            labels.has((child.textContent || "").trim())
+          );
+        });
+      if (fallback) {
+        fallback.click();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function catalogSections() {
+    for (const doc of pageDocuments()) {
+      const nodes = [...doc.querySelectorAll(".pc-slider-menu-micro")].filter(visible);
+      if (!nodes.length) continue;
+      return nodes
+        .map((element) => ({
+          element,
+          label: element.querySelector(".pc-menu-node-name")?.getAttribute("title") ||
+            element.innerText?.trim() || "",
+          active: element.classList.contains("pc-menu-activity") ||
+            Boolean(element.closest(".pc-menu-activity")) ||
+            Boolean(element.querySelector(".pc-menu-activity")),
+        }))
+        .filter((item) => item.label);
+    }
+    return [];
+  }
+
+  function nextCatalogSection() {
+    const sections = catalogSections();
+    const index = sections.findIndex((item) => item.active);
+    if (index < 0 || index + 1 >= sections.length) return null;
+    const next = sections[index + 1];
+    return {
+      ...next,
+      element: next.element.querySelector(".pc-menu-node-name") || next.element,
+    };
+  }
+
+  function isDiscussionPage() {
+    for (const doc of pageDocuments()) {
+      const crumbs = [...doc.querySelectorAll(".ant-breadcrumb li")];
+      const last = (crumbs[crumbs.length - 1]?.innerText || "").trim();
+      if (/^Discussion$/i.test(last)) return true;
+      const board = doc.querySelector("[id^='uai-bbs-'], [class*='discussion-board']");
+      if (board && visible(board) &&
+        /Discussion|讨论/i.test((board.innerText || "").slice(0, 200))) return true;
+      const editor = doc.querySelector(
+        "textarea[placeholder*='评论'], [contenteditable='true'][data-placeholder*='评论']"
+      );
+      if (editor && visible(editor)) return true;
+      const commentList = doc.querySelector(
+        "[class*='comment-list'], [class*='commentList'], [class*='comment_list']"
+      );
+      if (commentList && visible(commentList) &&
+        /全部评论|回复/.test(commentList.innerText || "")) return true;
+    }
+    return false;
+  }
+
+  async function waitForQuestionReady(attempts = 3, delay = 2000) {
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      const question = currentQuestion();
+      const controls = answerControls();
+      const video = videoForAutomation();
+      if ((question && looksLikeQuestion(question)) ||
+        controls.type !== "unsupported" ||
+        video.video ||
+        isDiscussionPage()) {
+        return true;
+      }
+      if (attempt < attempts) {
+        updateRunLog(`页面题目尚未加载，等待后重试（${attempt}/${attempts}）`, "info");
+        await wait(delay);
+      }
+    }
+    return false;
+  }
+
+  async function answerDiscussion() {
+    for (const doc of pageDocuments()) {
+      const editor = doc.querySelector(
+        "textarea[placeholder*='评论'], [contenteditable='true'][data-placeholder*='评论']"
+      );
+      if (!editor || !visible(editor)) continue;
+      const text = (doc.body.innerText || "")
+        .split("全部评论")[0]
+        .trim()
+        .slice(0, 1500);
+      if (!text) continue;
+      setStatus("正在生成讨论答案…");
+      const result = await request("/api/answer", {
+        question: text,
+        question_type: "discussion",
+      });
+      if (!result.answer) return false;
+      writeText(editor, result.answer.slice(0, 500));
+      await wait(500);
+      updateRunLog("讨论答案已填入；未自动发布", "success", true);
+      setStatus("讨论答案已填入，等待手动发布");
+      return true;
+    }
+    return false;
+  }
+
+  function pageActionButton() {
+    const labels = ["下一题", "下一步", "继续", "继续学习", "完成并继续"];
+    let best = null;
+    for (const doc of pageDocuments()) {
+      for (const element of doc.querySelectorAll("button, [role='button'], a")) {
+        const label = (element.innerText || "").trim().replace(/\s+/g, "");
+        if (!labels.includes(label)) continue;
+        if (!visible(element) || element.closest("#uca-panel")) continue;
+        if (element.disabled || element.getAttribute("aria-disabled") === "true") continue;
+        const rect = element.getBoundingClientRect();
+        if (rect.left > (window.innerWidth || 1200) * 0.85) continue;
+        if (!best || rect.top > best.top) best = { element, label, top: rect.top };
+      }
+    }
+    return best ? { element: best.element, label: best.label } : null;
+  }
+
+  function findSubmitButton() {
+    const labels = ["提交", "交卷", "保存并提交", "提交答案", "确定提交"];
+    for (const doc of pageDocuments()) {
+      for (const element of doc.querySelectorAll("button, [role='button'], a")) {
+        const label = (element.innerText || "").trim().replace(/\s+/g, "");
+        if (!labels.includes(label)) continue;
+        if (!visible(element) || element.closest("#uca-panel")) continue;
+        if (element.disabled || element.getAttribute("aria-disabled") === "true") continue;
+        return { element, label };
+      }
+    }
+    return null;
+  }
+
+  function submitDialogVisible() {
+    for (const doc of pageDocuments()) {
+      const text = doc.body?.innerText || "";
+      if (/确定提交|第一次作答|仅记录第一次|确认交卷|确定要交卷/.test(text)) return true;
+    }
+    return false;
+  }
+
+  function hasSubmitAction() {
+    if (nextQuestionButton()) return false;
+    return Boolean(findSubmitButton()) || submitDialogVisible();
+  }
+
+  async function waitingForManual(reason) {
+    manualStop = true;
+    automationRunning = false;
+    setStatus(reason);
+    updateRunLog(reason, "warn");
+    try {
+      await request("/api/automation/report", {
+        status: reason,
+        running: false,
+        url: location.href,
+        title: document.title,
+        completed: runState.completed,
+      });
+    } catch (_) {
+      // The UI will show the offline state.
+    }
+    try {
+      await request("/api/module/ucampus/finish", { reason });
+    } catch (_) {
+      // Ignore; the page agent is stopping anyway.
+    }
+  }
+
+  function controlsAnswered(controls) {
+    if (!controls) return false;
+    if (controls.type === "choice" && controls.group &&
+      typeof controls.group.querySelector === "function") {
+      return Boolean(controls.group.querySelector(
+        "input:checked, [aria-checked='true'], [class*='checked'], [class*='selected']"
+      ));
+    }
+    if (controls.type === "dropdown") {
+      const text = (controls.dropdown?.element?.querySelector(".user-answer-text")
+        ?.innerText || controls.dropdown?.element?.innerText || "").trim();
+      return Boolean(text) && !/请选择|choose|select/i.test(text);
+    }
+    if (controls.fields?.length) {
+      return controls.fields.every((field) =>
+        (field.value || field.textContent || "").trim()
+      );
+    }
+    return false;
+  }
+
+  async function confirmSubmitDialog() {
+    return submitDialogVisible();
+  }
+
+  async function clickPageAction() {
+    const action = pageActionButton();
+    if (!action) {
+      if (hasSubmitAction()) {
+        await waitingForManual("已填完，等待手动提交");
+      }
+      return false;
+    }
+    setStatus(`正在点击：${action.label}`);
+    const submittedKey = currentStepKey();
+    action.element.click();
+    await wait(1500);
+    submittedSteps.add(submittedKey);
+    pendingNavigation = true;
+    updateRunLog(`已点击：${action.label}`, "success", true);
+    if (action.label === "下一题" || action.label === "下一步") {
+      for (let retry = 0; retry < 12; retry += 1) {
+        await wait(500);
+        const next = pageActionButton();
+        if (next && (next.label === "下一题" || next.label === "下一步")) {
+          next.element.click();
+          await wait(1500);
+          updateRunLog(`已点击：${next.label}`, "success", true);
+          actionAdvanced = true;
+          break;
+        }
+      }
+    }
+    return true;
+  }
+
+  function installDubbingMic() {
+    const pageWindow = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
+    const media = pageWindow.navigator?.mediaDevices;
+    if (!media) return null;
+    if (!pageWindow.__ucaMicPatched) {
+      const original = media.getUserMedia?.bind(media);
+      media.getUserMedia = async (constraints) =>
+        pageWindow.__ucaDubbingStream || original(constraints);
+      pageWindow.__ucaMicPatched = true;
+    }
+    return pageWindow;
+  }
+
+  function dubbingScore(item) {
+    const element = item.item?.querySelector(".score, [class*='score']");
+    const text = (element?.innerText || "").trim();
+    const match = text.match(/\d+/);
+    return match ? Number(match[0]) : null;
+  }
+
+  async function waitDubbingScores(items, timeoutMs = 15000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const scores = items.map(dubbingScore);
+      if (scores.every((value) => value !== null)) return scores;
+      await wait(1000);
+    }
+    return items.map(dubbingScore);
+  }
+
+  async function recordDubbingItem(item) {
+    const blob = await request("/api/speech", { text: item.text }, "blob");
+    const pageWindow = installDubbingMic();
+    if (!pageWindow) throw new Error("页面没有可用的麦克风接口。");
+    const AudioContextClass = pageWindow.AudioContext || pageWindow.webkitAudioContext;
+    if (!AudioContextClass) throw new Error("页面不支持 Web Audio。");
+    const context = new AudioContextClass();
+    if (context.state === "suspended") await context.resume();
+    const buffer = await context.decodeAudioData(await blob.arrayBuffer());
+    const destination = context.createMediaStreamDestination();
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    source.connect(destination);
+    source.connect(context.destination);
+    pageWindow.__ucaDubbingStream = destination.stream;
+    source.start();
+    await wait(300);
+    updateRunLog(`开始朗读第 ${item.index + 1} 句：${item.text.slice(0, 60)}`, "info");
+    item.button.click();
+    await wait(buffer.duration * 1000 + 900);
+    item.button.click();
+    await wait(2500);
+    try { source.stop(); } catch (_) {}
+    await context.close();
+    pageWindow.__ucaDubbingStream = null;
+    const scoreText = (item.item?.querySelector(".score")?.innerText || "").trim();
+    const score = Number((scoreText.match(/\d+/) || [0])[0]);
+    updateRunLog(`第 ${item.index + 1} 句录制完成${scoreText ? `，得分 ${scoreText}` : ""}`, "success", true);
+    return score;
+  }
+
+  async function recordRoleplayLine(mic, line) {
+    const buffer = await fetchAudioBuffer(
+      "http://127.0.0.1:10021/api/speech/reference/audio"
+    );
+    if (!buffer) throw new Error("参考录音为空。");
+    const pageWindow = installDubbingMic();
+    if (!pageWindow) throw new Error("页面没有可用的麦克风接口。");
+    const AudioContextClass = pageWindow.AudioContext || pageWindow.webkitAudioContext;
+    if (!AudioContextClass) throw new Error("页面不支持 Web Audio。");
+    const context = new AudioContextClass();
+    if (context.state === "suspended") await context.resume();
+    const audio = await context.decodeAudioData(buffer.slice(0));
+    const destination = context.createMediaStreamDestination();
+    const source = context.createBufferSource();
+    source.buffer = audio;
+    source.loop = true;
+    source.connect(destination);
+    pageWindow.__ucaDubbingStream = destination.stream;
+    source.start();
+    mic.click();
+    const words = (line || "").split(/\s+/).filter(Boolean).length;
+    await wait(Math.max(3500, Math.min(12000, words * 450 + 1500)));
+    mic.click();
+    await wait(2200);
+    try { source.stop(); } catch (_) {}
+    await context.close();
+    pageWindow.__ucaDubbingStream = null;
+  }
+
+  async function answerRoleplay(controls) {
+    const doc = controls.doc;
+    const text = doc.body?.innerText || "";
+    const chosenMatch = /Choose a role\s*[：:]\s*(Janet|Porter)/i.exec(text);
+    let role = chosenMatch ? chosenMatch[1] : "";
+    if (!role) {
+      const roleCard = [...doc.querySelectorAll("div, span, button")]
+        .find((element) => visible(element) &&
+          /^(Janet|Porter)$/i.test((element.innerText || "").trim()) &&
+          !element.querySelector("div, span, button"));
+      if (roleCard) {
+        role = roleCard.innerText.trim();
+        roleCard.click();
+        await wait(1200);
+      }
+    }
+    if (!role) throw new Error("无法确定角色扮演角色。");
+
+    const lines = text.split(/\n+/).map((item) => item.trim()).filter(Boolean);
+    const scoreIndex = lines.lastIndexOf("Score");
+    const dialogue = [];
+    for (let index = scoreIndex + 1; index < lines.length - 1; index += 1) {
+      if (!/^(Janet|Porter)$/i.test(lines[index])) continue;
+      const next = lines[index + 1];
+      if (!next || /^(Janet|Porter)$/i.test(next)) continue;
+      dialogue.push({ role: lines[index], text: next });
+    }
+    const learnerLines = dialogue.filter((item) =>
+      item.role.toLowerCase() === role.toLowerCase()
+    );
+    const mic = [...doc.querySelectorAll(
+      "img[alt='录音'], img[help='录音'], [class*='record']"
+    )].find(visible);
+    if (!mic) throw new Error("未找到角色扮演麦克风按钮。");
+    updateRunLog(`角色扮演：${role}，共 ${learnerLines.length} 句`, "info");
+
+    const pageWindow = installDubbingMic();
+    const AudioContextClass = pageWindow.AudioContext || pageWindow.webkitAudioContext;
+    const context = new AudioContextClass();
+    if (context.state === "suspended") await context.resume();
+    const buffers = [];
+    for (const line of learnerLines) {
+      const blob = await request("/api/speech", {
+        text: line.text,
+        output_format: "mp3",
+        provider: "local",
+      }, "blob");
+      buffers.push(await context.decodeAudioData(await blob.arrayBuffer()));
+    }
+    const gap = 0.7;
+    const total = buffers.reduce((sum, item) => sum + item.duration, 0) +
+      gap * Math.max(0, buffers.length - 1);
+    const combined = context.createBuffer(1, Math.ceil(total * context.sampleRate),
+      context.sampleRate);
+    let offset = 0;
+    for (const buffer of buffers) {
+      combined.getChannelData(0).set(buffer.getChannelData(0),
+        Math.floor(offset * context.sampleRate));
+      offset += buffer.duration + gap;
+    }
+    const destination = context.createMediaStreamDestination();
+    const source = context.createBufferSource();
+    source.buffer = combined;
+    source.connect(destination);
+    pageWindow.__ucaDubbingStream = destination.stream;
+
+    mic.click();
+    await wait(600);
+    source.start();
+    updateRunLog(`开始录制角色扮演，时长约 ${Math.round(total)} 秒`, "info");
+    await wait(total * 1000 + 1800);
+    mic.click();
+    await wait(5000);
+    try { source.stop(); } catch (_) {}
+    await context.close();
+    pageWindow.__ucaDubbingStream = null;
+
+    const scores = [...doc.querySelectorAll("*")]
+      .filter((element) => {
+        const value = (element.innerText || "").trim();
+        return /^\d{1,3}$/.test(value) && !element.querySelector("*") &&
+          element.getBoundingClientRect().left < 110 &&
+          element.getBoundingClientRect().width > 0;
+      })
+      .map((element) => Number(element.innerText.trim()))
+      .filter((value) => value <= 100);
+    const average = scores.length
+      ? scores.reduce((sum, value) => sum + value, 0) / scores.length
+      : 0;
+    updateRunLog(`角色扮演得分：${scores.join(", ")}，平均 ${average.toFixed(1)}`,
+      average >= 75 ? "success" : "error", true);
+    if (average < 75) {
+      throw new Error(`角色扮演平均分 ${average.toFixed(1)}，低于 75，未提交。`);
+    }
+    await clickPageAction();
+  }
+
+  async function waitForUploadResult(doc, timeoutMs = 30000) {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      const text = doc.body?.innerText || "";
+      if (/上传失败|文件上传失败|上传出错/.test(text)) return false;
+      const item = doc.querySelector(
+        ".ant-upload-list-item, [class*='upload-list'] [class*='item']"
+      );
+      if (item) {
+        const className = typeof item.className === "string" ? item.className : "";
+        if (/done|success/i.test(className) || /上传成功/.test(text)) return true;
+        if (/error|fail/i.test(className)) return false;
+      }
+      await wait(1000);
+    }
+    return !/上传失败|文件上传失败|上传出错/.test(doc.body?.innerText || "");
+  }
+
+  async function processQuestion() {
+    if (pendingNavigation) {
+      pendingNavigation = false;
+      setStatus("页面加载中，等待题目…");
+      await wait(2000);
+      await waitForQuestionReady(3, 2000);
+    }
+    if (await confirmSubmitDialog()) {
+      await waitingForManual("检测到提交确认弹窗，等待手动提交");
+      return false;
+    }
+    if (hasSubmitAction()) {
+      await waitingForManual("当前页面已到提交步骤，等待手动提交");
+      return false;
+    }
+    if (dismissBlockingDialog()) await wait(400);
+    if (isDiscussionPage()) {
+      const filled = await answerDiscussion();
+      if (filled) {
+        runState.completed += 1;
+        await waitingForManual("讨论答案已填入，等待手动发布");
+        return false;
+      }
+      updateRunLog("讨论页没有可填写的编辑器，自动流程已停止", "error");
+      return false;
+    }
+    const earlyControls = answerControls();
+    if (!currentQuestion() && earlyControls.type !== "dubbing" && pageActionButton()) {
+      await clickPageAction();
+      return { type: "content" };
+    }
+    const previewControls = answerControls();
+    updateRunLog(`当前题型：${previewControls.type}`, "info");
+    if (previewControls.type === "roleplay") {
+      await waitingForManual("角色扮演需要录音/评分，已在提交前停止；请手动完成");
+      return false;
+    }
+    if (previewControls.type === "dubbing") {
+      await waitingForManual("朗读评分题需要录音提交，已停止；请手动完成");
+      return false;
+    }
+    const detectedVideo = videoForAutomation();
+    const previewQuestion = currentQuestion();
+    const videoWithQuestions = Boolean(
+      detectedVideo.video && previewQuestion &&
+      ["choice", "dropdown", "blank", "blanks", "oral"].includes(previewControls.type)
+    );
+    if (detectedVideo.error && !videoWithQuestions) {
+      await reportUnknown(currentQuestion(), detectedVideo.error);
+      return false;
+    }
+    if (detectedVideo.video && !videoWithQuestions) {
+      try {
+        const completed = await playVideoToEnd(detectedVideo.video);
+        if (completed) {
+          updateRunLog("课程视频播放完成");
+          return { type: "video" };
+        }
+        return false;
+      } catch (error) {
+        await reportUnknown(currentQuestion(), error.message);
+        return false;
+      }
+    }
+
+    let videoTranscript = "";
+    if (videoWithQuestions) {
+      const videoKey = detectedVideo.video.currentSrc ||
+        detectedVideo.video.src || location.href;
+      videoTranscript = VIDEO_TRANSCRIPT_CACHE.get(videoKey) || "";
+      if (videoTranscript) {
+        updateRunLog("复用已转写的视频文本", "info");
+      } else {
+        updateRunLog("检测到视频+题目，开始提取视频音频", "info");
+        setStatus("正在转写视频音频…");
+        videoTranscript = await transcribeVideoAudio(detectedVideo.video);
+        if (!videoTranscript) {
+          updateRunLog("视频音轨不可用，改用系统录音", "info");
+          setStatus("视频音轨不可用，正在录制系统声音…");
+          try {
+            videoTranscript = await recordPageAudioTranscript(30);
+          } catch (error) {
+            updateRunLog(`视频音频录制失败：${error.message}`, "error");
+          }
+        }
+        if (videoTranscript) {
+          VIDEO_TRANSCRIPT_CACHE.set(videoKey, videoTranscript);
+          updateRunLog("视频音频转写完成", "info");
+        } else {
+          updateRunLog("视频音频转写为空", "error");
+        }
+      }
+    }
+
+    let audioTranscript = videoTranscript;
+    const audioList = audioSources();
+    const controls = answerControls();
+    if (controls.type === "essays") {
+      for (const [index, field] of controls.fields.entries()) {
+        const container = field.closest(".item, [class*='question']") ||
+          field.parentElement;
+        let prompt = (container?.innerText || "").trim();
+        if (!prompt) prompt = currentQuestion();
+        prompt = prompt.slice(0, 2000);
+        setStatus(`正在回答第 ${index + 1}/${controls.fields.length} 道问答题…`);
+        updateRunLog(`问答题 ${index + 1}：请求模型`, "info");
+        const result = await request("/api/answer", {
+          question: prompt,
+          question_type: "essay",
+        });
+        if (!result.answer) {
+          updateRunLog(`问答题 ${index + 1} 未生成答案`, "error");
+          return false;
+        }
+        writeText(field, result.answer);
+        updateRunLog(`问答题 ${index + 1} 已填入`, "success", true);
+        await wait(300);
+      }
+      await clickPageAction();
+      return { type: "question" };
+    }
+    const blankAudio = controls.type === "blanks" && audioList.length > 1;
+    const audioLimit = blankAudio ? 12 : 3;
+    if (!videoTranscript && audioList.length >= 1 && audioList.length <= audioLimit) {
+      const pageKey = `${location.href}|${blankAudio ? "blanks" : "normal"}`;
+      if (!PAGE_TRANSCRIPT_CACHE.has(pageKey)) {
+        updateRunLog(`检测到 ${audioList.length} 个听力音频，开始转写`, "info");
+        setStatus("正在转写听力音频…");
+        let text = "";
+        if (blankAudio) {
+          const parts = await pageAudioTranscripts(12, 12);
+          text = parts
+            .map((part, index) => part ? `${index + 1}. ${part}` : "")
+            .filter(Boolean)
+            .join("\n");
+        } else {
+          text = await pageAudioTranscript();
+          if (!text) {
+            setStatus("音频下载失败，正在录制系统声音…");
+            try {
+              text = await recordPageAudioTranscript();
+            } catch (error) {
+              updateRunLog(`系统录音转写失败：${error.message}`, "error");
+            }
+          }
+        }
+        if (text) PAGE_TRANSCRIPT_CACHE.set(pageKey, text);
+      }
+      audioTranscript = PAGE_TRANSCRIPT_CACHE.get(pageKey) || "";
+      if (audioTranscript) updateRunLog("听力音频转写完成", "info");
+    }
+
+    const question = currentQuestion();
+    if (submittedSteps.has(currentStepKey())) {
+      updateRunLog("该页已提交，跳过重复提交", "info");
+      return { type: "content" };
+    }
+    if (controlsAnswered(controls)) {
+      updateRunLog("检测到题目已作答，跳过重复作答", "info");
+      await clickPageAction();
+      return { type: "content" };
+    }
+    let questionForModel = audioTranscript
+      ? `${question || "听力题"}\n\n[听力原文]\n${audioTranscript}`
+      : question;
+    if (controls.type === "matching") {
+      questionForModel += "\n\n[单词]\n" +
+        controls.words.map((word, index) => `${index + 1}. ${word}`).join("\n") +
+        "\n[含义]\n" +
+        controls.meanings.map((meaning) => meaning.text).join("\n");
+    }
+    if ((!question && !audioTranscript) || controls.type === "unsupported") {
+      if (controls.type === "unsupported" &&
+        /已全部作答/.test(controls.reason || "")) {
+        updateRunLog("本页选择题已全部作答，继续下一节", "info");
+        return { type: "content" };
+      }
+      if (question && !looksLikeQuestion(question)) {
+        updateRunLog("当前为无题目学习页，跳过答题并继续", "info");
+        return { type: "content" };
+      }
+      const reason = !question ? "无法从页面提取当前题目文本。" : controls.reason;
+      await reportUnknown(question, reason);
+      return false;
+    }
+
+    setStatus("正在请求模型…");
+    if (controls.type === "oral") {
+      updateRunLog(`口语题：请求模型，题目长度 ${questionForModel.length}`, "info");
+    }
+    const result = await request("/api/answer", {
+      question: questionForModel,
+      options: controls.options?.map((option, index) =>
+        `${String.fromCharCode(65 + index)}. ${option.text}`
+      ) || [],
+      question_type: controls.type,
+      blank_count: controls.type === "blanks" ? controls.fields.length : 0,
+    });
+    if (controls.type === "oral") {
+      if (!result.answer) {
+        await reportUnknown(question, "模型未生成口语答案。");
+        return false;
+      }
+      setStatus("正在合成口语答案…");
+      if (controls.audioInput) {
+        await attachGeneratedAudio(controls.audioInput, result.answer);
+        setStatus("等待音频上传完成…");
+        const uploaded = await waitForUploadResult(controls.doc);
+        if (!uploaded) {
+          updateRunLog("音频上传失败，已停止提交", "error");
+          return false;
+        }
+        updateRunLog("音频已填入，等待手动提交", "success", true);
+      } else {
+        updateRunLog("未找到音频上传控件，已停止", "error");
+        return false;
+      }
+      await waitingForManual("口语答案音频已填入，等待手动提交");
+      return false;
+    } else {
+      try {
+        await applyAnswer(result.answer, controls);
+      } catch (error) {
+        await reportUnknown(question, error.message);
+        return false;
+      }
+    }
+    const questionType = controls.type === "oral" ? "口语题"
+      : controls.type === "blank" ? "填空题"
+      : controls.type === "blanks" ? "多空填空题"
+      : controls.type === "matching" ? "匹配题" : "选择题";
+    updateRunLog(`${questionType}已完成`, "success", true);
+    const remaining = answerControls();
+    const allDone = remaining.type === "unsupported" &&
+      /已全部作答/.test(remaining.reason || "");
+    if (allDone || currentQuestion() === question) {
+      await clickPageAction();
+    }
+    return { type: "question" };
+  }
+
+  async function runAutomation() {
+    if (automationRunning) return;
+    runState = loadRunState();
+    automationRunning = true;
+    const visited = new Set();
+    updateRunLog("开始自动学习");
+    if (automationIntro) {
+      updateRunLog(automationIntro);
+      automationIntro = "";
+    }
+    try {
+      while (automationRunning) {
+        const stepKey = currentStepKey();
+        const question = currentQuestion();
+        if (!pendingNavigation && visited.has(stepKey)) {
+          await reportUnknown(question, "检测到重复页面，已停止以避免重复处理。");
+          break;
+        }
+        visited.add(stepKey);
+        const outcome = await processQuestion();
+        if (!outcome) {
+          if (automationRunning) updateRunLog("遇到无法处理的题目，自动流程已停止", "error");
+          break;
+        }
+        if (!automationRunning) break;
+        if (pendingNavigation) {
+          continue;
+        }
+        if (actionAdvanced) {
+          actionAdvanced = false;
+          pendingNavigation = true;
+          continue;
+        }
+        const pendingControls = answerControls();
+        if (currentStepKey() !== stepKey &&
+          ["choice", "dropdown", "blanks"].includes(pendingControls.type)) {
+          updateRunLog("当前页还有下一题，直接继续", "info");
+          continue;
+        }
+        const allAnswered = pendingControls.type === "unsupported" &&
+          /已全部作答/.test(pendingControls.reason || "");
+        const next = nextLearningTarget(outcome.type === "content" || allAnswered);
+        if (!next) {
+          const message = outcome.type === "video"
+            ? "视频已完成，未找到可识别的下一学习页，流程结束。"
+            : "本页已完成，未找到下一题或目录下一项，流程结束。";
+          setStatus(message);
+          updateRunLog(message);
+          break;
+        }
+        const beforeTaskIndex = activeCourseTask(courseTasks());
+        setStatus(`正在进入：${next.label}`);
+        const targetRect = next.element.getBoundingClientRect();
+        updateRunLog(
+          `跳转到：${next.label} 坐标 (${Math.round(targetRect.left)},${Math.round(targetRect.top)})`
+        );
+        next.element.click();
+        let changed = false;
+        if (next.sectionTab) {
+          for (let retry = 0; retry < 20 && automationRunning; retry += 1) {
+            await wait(500);
+            const active = contentTabs().find((tab) => tab.active);
+            if (active && active.label === next.label) {
+              changed = true;
+              break;
+            }
+          }
+          if (!changed && automationRunning) {
+            await wait(2500);
+            changed = true;
+          }
+        } else {
+          for (let retry = 0; retry < 40 && automationRunning; retry += 1) {
+            await wait(500);
+            const taskIndex = activeCourseTask(courseTasks());
+            if (currentStepKey() !== stepKey ||
+              (next.task && taskIndex >= 0 && taskIndex !== beforeTaskIndex)) {
+              changed = true;
+              break;
+            }
+          }
+        }
+        if (changed) pendingNavigation = true;
+        if (automationRunning && !changed) {
+          const fallback = nextCatalogSection();
+          if (fallback && fallback.element !== next.element) {
+            const fallbackKey = currentStepKey();
+            setStatus(`“${next.label}”无变化，改跳下一节：${fallback.label}`);
+            updateRunLog(`“${next.label}”无变化，改跳下一节：${fallback.label}`, "info");
+            fallback.element.click();
+            for (let retry = 0; retry < 30 && automationRunning; retry += 1) {
+              await wait(500);
+              if (currentStepKey() !== fallbackKey) {
+                changed = true;
+                break;
+              }
+            }
+            if (changed) {
+              pendingNavigation = true;
+              continue;
+            }
+          }
+          const message = `点击“${next.label}”后页面没有变化，自动流程已停止。`;
+          await reportUnknown(currentQuestion(), message);
+          updateRunLog(message, "error");
+          break;
+        }
+      }
+      if (!automationRunning && !manualStop) updateRunLog("已手动停止自动学习");
+    } catch (error) {
+      setStatus(`自动答题已停止：${error.message}`, true);
+      updateRunLog(`发生错误：${error.message}`, "error");
+    } finally {
+      automationRunning = false;
+      if (!manualStop && !currentStatus.includes("失败") && !currentStatus.includes("发生错误")) {
+        setStatus(`自动学习结束，本次完成 ${runState.completed} 道题。`);
+      }
+      if (!manualStop) {
+        try {
+          await request("/api/module/ucampus/finish", { reason: currentStatus });
+        } catch (_) {
+          // The page may be navigating; the Python module will time out the lease.
+        }
+      }
+      manualStop = false;
+    }
+  }
+
+  function attachAudio() {
+    const input = pageDocuments().flatMap((doc) =>
+      [...doc.querySelectorAll("input[type='file']")]
+    ).find((element) => visible(element) && /audio|wav|mp3|mpeg/i.test(element.accept || ""));
+    if (!input || !audioBlob) {
+      setStatus("未找到可用音频上传控件；可在面板试听或下载音频。", true);
+      return;
+    }
+    const extension = audioBlob.type.includes("wav") ? "wav" : "mp3";
+    const file = new File([audioBlob], `assistant-answer.${extension}`, {
+      type: audioBlob.type || "audio/mpeg",
+    });
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    input.files = transfer.files;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    setStatus("音频已放入上传控件；请检查页面预览并自行提交。");
+  }
+
+  async function handleControllerCommand(command) {
+    if (command.action === "start") {
+      if (automationRunning) return;
+      manualStop = false;
+      runState = { completed: 0, entries: [] };
+      gmSet(RUN_STATE_KEY, runState);
+      if (isCourseDetailPage()) await startFromCourseDetail();
+      else await runAutomation();
+      return;
+    }
+    if (command.action === "stop") {
+      automationRunning = false;
+      setStatus("控制台已请求停止。");
+      updateRunLog("收到控制台停止指令");
+      return;
+    }
+    if (command.action === "read") {
+      const question = currentQuestion();
+      setStatus(question ? "已将当前题目同步到控制台。" : "当前页面没有可读取的题目文本。", !question);
+      updateRunLog(question ? "已读取当前页面题目" : "当前页面没有可读取的题目文本", question ? "info" : "error");
+      return;
+    }
+    if (command.action === "fill") {
+      const controls = answerControls();
+      if (controls.type === "unsupported") {
+        await reportUnknown(currentQuestion(), controls.reason);
+        return;
+      }
+      await applyAnswer(command.value, controls);
+      updateRunLog("控制台答案已回填到当前页面", "success");
+      setStatus("答案已回填；不会自动提交。");
+      return;
+    }
+    if (command.action === "attach_audio") {
+      const bytes = Uint8Array.from(atob(command.value), (character) => character.charCodeAt(0));
+      audioBlob = new Blob([bytes], { type: command.media_type || "audio/mpeg" });
+      attachAudio();
+    }
+  }
+
+  function hasContentForAutomation() {
+    if (isCourseDetailPage()) return courseTasks().length > 0;
+    if (isDiscussionPage()) return true;
+    if (currentQuestion()) return true;
+    if (videoForAutomation().video) return true;
+    const controls = answerControls();
+    if (controls.type !== "unsupported") return true;
+    if (practiceTab()) return true;
+    if (contentTabs().length > 0) return true;
+    return false;
+  }
+
+  let resumeScheduled = false;
+
+  async function pollController() {
+    if (controllerPolling) return;
+    controllerPolling = true;
+    try {
+      const controls = answerControls();
+      const response = await request("/api/automation/poll", {
+        client_id: CLIENT_ID,
+        url: location.href,
+        title: document.title,
+        frame: window.top === window ? "top" : "child",
+        is_course_detail: isCourseDetailPage(),
+        has_content: hasContentForAutomation(),
+        running: automationRunning,
+        status: currentStatus,
+        question: currentQuestion(),
+        options: controls.options?.map((option) => option.text) || [],
+        question_type: controls.type,
+        completed: runState.completed,
+      });
+      backendConnected = true;
+      if (response.command) {
+        updateRunLog(`收到指令：${response.command.action}`);
+        void handleControllerCommand(response.command).catch((error) => {
+          updateRunLog(`指令执行失败：${error.message}`, "error");
+          setStatus(`指令执行失败：${error.message}`, true);
+        });
+      }
+      if (response.active && response.lease && !automationRunning && !manualStop && !resumeScheduled) {
+        resumeScheduled = true;
+        window.setTimeout(async () => {
+          resumeScheduled = false;
+          if (automationRunning) return;
+          try {
+            if (isCourseDetailPage()) {
+              if (!courseStartAttempted) await startFromCourseDetail();
+            } else if (hasContentForAutomation()) {
+              await runAutomation();
+            }
+          } catch (error) {
+            updateRunLog(`自动恢复失败：${error.message}`, "error");
+          }
+        }, 700);
+      }
+    } catch (error) {
+      backendConnected = false;
+    } finally {
+      controllerPolling = false;
+    }
+  }
+
+  void pollController();
+  window.setInterval(pollController, 1500);
+})();

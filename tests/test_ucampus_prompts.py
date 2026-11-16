@@ -1,0 +1,41 @@
+from __future__ import annotations
+
+from packages.src.ucampus.backend.prompts import build_prompt, parse_answer
+
+
+def test_choice_prompt_requests_json() -> None:
+    prompt = build_prompt(
+        {
+            "question": "Choose the best answer.",
+            "options": ["A. one", "B. two"],
+            "question_type": "choice",
+        }
+    )
+    assert "Choose the best answer." in prompt
+    assert "A. one" in prompt
+    assert '"answer"' in prompt
+
+
+def test_blanks_prompt_count() -> None:
+    prompt = build_prompt(
+        {"question": "Fill in the blanks.", "question_type": "blanks", "blank_count": 3}
+    )
+    assert "3 个空" in prompt
+    assert "3 行" in prompt
+
+
+def test_parse_standard_json() -> None:
+    assert parse_answer('{"answer":"B","explanation":"because"}', "choice") == ("B", "because")
+    assert parse_answer('```json\n{"answer":"A"}\n```', "choice") == ("A", "")
+
+
+def test_parse_blanks_lines() -> None:
+    answer, _ = parse_answer("first\nsecond\nthird", "blanks", 3)
+    assert answer == "first\nsecond\nthird"
+    answer, _ = parse_answer("1. one\n2. two", "blanks", 2)
+    assert answer == "one\ntwo"
+
+
+def test_parse_matching() -> None:
+    assert parse_answer("D A B C", "matching")[0] == "D\nA\nB\nC"
+    assert parse_answer('["D","A"]', "matching")[0] == "D\nA"

@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "api_version": 1,
+  "id": "demo_module",
+  "name": "演示模块",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "仅用于框架测试的演示模块。",
+  "entry": "main:setup",
+  "platform": "any",
+  "requires": [],
+  "settings": [
+    {
+      "id": "demo_module",
+      "title": "演示模块",
+      "order": 900,
+      "fields": [
+        {"key": "message", "type": "text", "label": "消息", "default": "hello"}
+      ]
+    }
+  ]
+}

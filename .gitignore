@@ -1,0 +1,47 @@
+# Python
+.venv/
+.uv-cache/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+*.spec
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# Node / tooling
+.npm-cache/
+node_modules/
+.playwright/
+playwright-report/
+test-results/
+
+# Application data / runtime
+data/
+logs/
+models/
+*.log
+*.tmp
+*.bak
+
+# Generated package/extension artifacts
+packages/dist/
+extension/dist/
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "api_version": 1,
+  "id": "ucampus",
+  "name": "U校园",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "U校园网页自动学习：识别题目、听力转写、作答与回填；遇到提交/发布时停止。",
+  "author": "FreeOCS",
+  "license": "MIT",
+  "entry": "main:setup",
+  "platform": "web",
+  "requires": ["llm.chat", "media.asr", "media.tts", "web.bridge"],
+  "optional_requires": ["answer.choice", "media.ocr"],
+  "provides": {},
+  "dependencies": [],
+  "min_app_version": "0.1.0",
+  "web": {
+    "allowed_hosts": ["*.unipus.cn", "unipus.cn"]
+  },
+  "page_agents": [
+    {
+      "id": "ucampus",
+      "matches": ["*://*.unipus.cn/*"],
+      "entry": "web/page-agent.js"
+    }
+  ],
+  "panels": [
+    {
+      "id": "ucampus_console",
+      "title": "U校园状态",
+      "entry": "web/panel.js",
+      "styles": ["web/panel.css"],
+      "order": 100
+    }
+  ],
+  "settings": [
+    {
+      "id": "ucampus",
+      "title": "U校园",
+      "order": 300,
+      "fields": [
+        {"key": "auto_start_on_course", "type": "boolean", "label": "打开课程页时自动开始", "default": false, "help": "仅在浏览器扩展已连接时生效。"},
+        {"key": "play_video", "type": "boolean", "label": "自动播放课程视频", "default": true},
+        {"key": "asr_language", "type": "text", "label": "听力转写语言", "default": "", "placeholder": "留空自动检测；例如 en / zh"},
+        {"key": "max_audio_files", "type": "integer", "label": "单页最多转写音频数", "default": 12, "min": 1, "max": 30, "step": 1},
+        {"key": "tts_voice", "type": "text", "label": "语音合成 voice", "default": "", "placeholder": "留空使用全局 TTS 默认"},
+        {"key": "tts_format", "type": "select", "label": "口语题音频格式", "default": "mp3", "options": [{"value": "mp3", "label": "MP3"}, {"value": "wav", "label": "WAV"}]},
+        {"key": "answer_timeout", "type": "number", "label": "模型超时（秒）", "default": 300, "min": 10, "max": 1800, "step": 10},
+        {"key": "transcribe_timeout", "type": "number", "label": "转写超时（秒）", "default": 600, "min": 30, "max": 1800, "step": 10},
+        {"key": "stop_on_unknown", "type": "boolean", "label": "无法识别时停止", "default": true},
+        {"key": "log_questions", "type": "boolean", "label": "把题干写入日志", "default": false}
+      ]
+    }
+  ]
+}

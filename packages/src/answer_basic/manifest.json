@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "api_version": 1,
+  "id": "answer_basic",
+  "name": "基础选择题答题",
+  "version": "0.1.0",
+  "type": "plugin",
+  "description": "基于大模型的选择题辅助：题干 + 选项 → 一个选项。",
+  "author": "FreeOCS",
+  "license": "MIT",
+  "entry": "main:setup",
+  "platform": "any",
+  "requires": ["llm.chat"],
+  "provides": {
+    "answer.choice": {
+      "version": 1,
+      "title": "基础选择题",
+      "description": "适合单选题；复杂题型由模块自行处理"
+    }
+  },
+  "dependencies": [],
+  "settings": []
+}
