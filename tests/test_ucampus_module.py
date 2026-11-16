@@ -239,3 +239,14 @@ def test_page_agent_has_no_auto_submit() -> None:
     assert "await dragSortable" not in code
     assert "window.confirm" in code
     assert "save-page" in code
+    assert "radioGroups" in code
+    assert "checkboxGroups" in code
+    assert "isVoicePracticePage" in code
+    assert "watchSubmitHandoff" in code
+    assert "isContentOnlyPage" in code
+    assert "foc-answer" in code
+    assert "setPanelAnswer" in code
+    assert "discussionEditorText" in code
+    assert "pointerdown" in code
+    assert "initialVideoWithQuestions" in code
+    assert "videoWithQuestions && !videoTranscript" in code

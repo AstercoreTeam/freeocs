@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 import threading
+import traceback
 import uuid
 from pathlib import Path
+from typing import Any
 
 from freeocs.sdk import PackageContext, ProviderError, Transcript
 
@@ -72,12 +76,56 @@ class WhisperASR:
         temp_dir.mkdir(parents=True, exist_ok=True)
         path = temp_dir / f"input-{uuid.uuid4().hex}{suffix}"
         path.write_bytes(audio)
+        converted = None
         try:
+            # PyAV decodes MP4 metadata as ASCII in some versions.  Chinese
+            # titles/metadata in U校园 videos then make faster-whisper fail
+            # before the audio is decoded.  Normalize through ffmpeg with
+            # metadata stripped when available.
+            transcribe_path = path
+            ffmpeg = shutil.which("ffmpeg") or "/usr/bin/ffmpeg"
+            if suffix not in {".wav"}:
+                converted = temp_dir / f"input-{uuid.uuid4().hex}.wav"
+                try:
+                    subprocess.run(
+                        [
+                            ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                            "-i", str(path), "-map_metadata", "-1", "-vn",
+                            "-ac", "1", "-ar", "16000", "-f", "wav", str(converted),
+                        ],
+                        capture_output=True,
+                        timeout=120,
+                        check=False,
+                    )
+                    if converted.is_file() and converted.stat().st_size > 44:
+                        transcribe_path = converted
+                        self.api.log("info", f"ASR 已转换音频：{suffix} -> wav")
+                    else:
+                        self.api.log("warn", f"ASR 音频转换失败，继续使用原文件：{suffix}")
+                except (OSError, subprocess.SubprocessError) as exc:
+                    self.api.log("warn", f"ASR 音频转换异常：{exc}")
+                    transcribe_path = path
             model = self._load_model()
             lang = (language or str(self.api.settings.get("language", "") or "")).strip() or None
+            model_input: Any = str(transcribe_path)
+            if Path(transcribe_path).suffix.lower() == ".wav":
+                try:
+                    import wave
+
+                    import numpy as np
+
+                    with wave.open(str(transcribe_path), "rb") as wav:
+                        if wav.getsampwidth() == 2:
+                            pcm = wav.readframes(wav.getnframes())
+                            model_input = np.frombuffer(pcm, dtype=np.int16).astype(
+                                np.float32
+                            ) / 32768.0
+                except Exception as exc:  # noqa: BLE001
+                    self.api.log("warn", f"WAV 预读失败，交给 faster-whisper：{exc}")
+                    model_input = str(transcribe_path)
             with self._lock:
                 segments, info = model.transcribe(
-                    str(path),
+                    model_input,
                     language=lang,
                     beam_size=5,
                     vad_filter=bool(self.api.settings.get("vad_filter", True)),
@@ -104,9 +152,12 @@ class WhisperASR:
         except ProviderError:
             raise
         except Exception as exc:  # noqa: BLE001
+            self.api.log("error", f"ASR traceback:\n{traceback.format_exc()}")
             raise ProviderError(f"语音转写失败：{exc}", provider="asr_whisper") from exc
         finally:
             path.unlink(missing_ok=True)
+            if converted is not None:
+                converted.unlink(missing_ok=True)
 
     def close(self) -> None:
         with self._lock:

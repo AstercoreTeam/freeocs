@@ -24,6 +24,18 @@ def test_blanks_prompt_count() -> None:
     assert "3 行" in prompt
 
 
+def test_multi_choice_prompt() -> None:
+    prompt = build_prompt(
+        {
+            "question": "Choose all correct answers.",
+            "options": ["A. one", "B. two", "C. three"],
+            "question_type": "multi-choice",
+        }
+    )
+    assert "多选题" in prompt
+    assert "A, C" in prompt
+
+
 def test_reading_context_is_included() -> None:
     prompt = build_prompt(
         {

@@ -151,13 +151,18 @@ class Application:
         try:
             storage = self.paths.cache_dir / "webview"
             storage.mkdir(parents=True, exist_ok=True)
-            webview.start(
-                http_server=True,
-                debug=self.dev,
-                private_mode=False,
-                storage_path=str(storage),
-                icon=str(web_dir / "favicon.ico") if (web_dir / "favicon.ico").is_file() else None,
-            )
+            start_kwargs: dict[str, Any] = {
+                "http_server": True,
+                "debug": self.dev,
+                "private_mode": False,
+                "storage_path": str(storage),
+                "icon": str(web_dir / "favicon.ico") if (web_dir / "favicon.ico").is_file() else None,
+            }
+            # pywebview may try Qt first even when only GTK/WebKit2 is installed.
+            # Force the Linux backend so the window actually opens.
+            if sys.platform.startswith("linux"):
+                start_kwargs["gui"] = "gtk"
+            webview.start(**start_kwargs)
         finally:
             self.shutdown()
 

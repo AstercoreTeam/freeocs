@@ -15,6 +15,9 @@ def test_defaults_and_sections(tmp_path: Path) -> None:
     assert ids[:4] == ["ui", "llm", "usage", "bridge"]
     assert "android" in ids
     assert store.core_get("usage", "price_per_million") == 0.0
+    assert store.core_get("usage", "cache_hit_price_per_million") == 0.0
+    assert store.core_get("usage", "cache_miss_price_per_million") == 0.0
+    assert store.core_get("usage", "output_price_per_million") == 0.0
     assert store.core_get("usage", "monthly_limit") == 0.0
 
 

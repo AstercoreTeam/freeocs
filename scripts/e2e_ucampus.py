@@ -101,6 +101,18 @@ PAGE = r'''<!doctype html>
   <h2>Quiz summary</h2>
   <button id="submit">提交</button>
 </div>
+<div id="second" style="display:none">
+  <div class="question-common-abs-choice">
+    <div class="ques-title">Second question: choose the correct answer.</div>
+    <div class="option" id="opt2-a"><span class="caption">A</span><span class="content">one</span></div>
+    <div class="option" id="opt2-b"><span class="caption">B</span><span class="content">two</span></div>
+  </div>
+  <button id="next2">下一题</button>
+</div>
+<div id="submit2" style="display:none">
+  <h2>Second summary</h2>
+  <button id="submit-final">提交</button>
+</div>
 <script>
   window.__submitClicks = 0;
   window.__modalDismissed = false;
@@ -132,6 +144,12 @@ PAGE = r'''<!doctype html>
   });
   document.getElementById("submit").addEventListener("click", () => {
     window.__submitClicks += 1;
+    document.getElementById("submit-page").style.display = "none";
+    document.getElementById("second").style.display = "block";
+  });
+  document.getElementById("next2").addEventListener("click", () => {
+    document.getElementById("second").style.display = "none";
+    document.getElementById("submit2").style.display = "block";
   });
 </script>
 </body></html>'''
@@ -226,17 +244,33 @@ def main() -> int:
             print("SUBMIT_VISIBLE:", page.evaluate("getComputedStyle(document.getElementById('submit-page')).display !== 'none'"))
             print("MODAL_DISMISSED:", page.evaluate("window.__modalDismissed"))
             print("VIDEO_PASSED:", page.evaluate("window.__videoPassed"))
+            if state["state"] == "waiting":
+                print("USER SUBMIT: click")
+                page.locator("#submit").click()
+                deadline = time.time() + 35
+                while time.time() < deadline:
+                    state = app.modules.state("ucampus")
+                    if (state["state"] == "waiting" and
+                            page.evaluate("document.querySelector('#second .option.selected')?.innerText || ''")):
+                        break
+                    time.sleep(0.5)
+                print("HANDOFF_STATE:", state["state"], state["message"])
+                print("HANDOFF_SECOND:", page.evaluate("document.querySelector('#second .option.selected')?.innerText || ''"))
+                print("HANDOFF_SUBMIT_VISIBLE:", page.evaluate("getComputedStyle(document.getElementById('submit2')).display !== 'none'"))
+                print("SUBMIT_CLICKS_AFTER:", page.evaluate("window.__submitClicks"))
             for event in app.events.since(0, 300)["events"]:
                 if event.get("package") == "ucampus":
                     print("EVENT:", event.get("level"), event.get("message"))
             ok = (
                 app.web.connected
                 and state["state"] == "waiting"
-                and page.evaluate("window.__submitClicks") == 0
                 and "two" in page.evaluate("document.querySelector('.option.selected')?.innerText || ''")
                 and state["extra"].get("last_answer") == "B"
                 and page.evaluate("window.__modalDismissed") is True
                 and page.evaluate("window.__videoPassed") is True
+                and page.evaluate("window.__submitClicks") == 1
+                and "two" in page.evaluate("document.querySelector('#second .option.selected')?.innerText || ''")
+                and page.evaluate("getComputedStyle(document.getElementById('submit2')).display !== 'none'")
             )
             result = 0 if ok else 1
         finally:

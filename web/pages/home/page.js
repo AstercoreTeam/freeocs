@@ -28,7 +28,10 @@
     const remaining = u.remaining;
     const percent = limit > 0 ? Math.min(100, (monthCost / limit) * 100) : 0;
     const reached = Boolean(u.limit_reached);
-    const price = Number(u.price_per_million || 0);
+    const hitPrice = Number(u.cache_hit_price_per_million || 0);
+    const missPrice = Number(u.cache_miss_price_per_million || 0);
+    const outputPrice = Number(u.output_price_per_million || 0);
+    const hasPrice = hitPrice > 0 || missPrice > 0 || outputPrice > 0;
     return `
       <div class="card mt-14">
         <div class="card-head">
@@ -42,7 +45,7 @@
           <div class="stat-card">
             <div class="stat-label">本月 Token</div>
             <div class="stat-value">${UI.escapeHtml(formatTokens(u.month_tokens))}</div>
-            <div class="stat-hint">输入 ${UI.escapeHtml(formatTokens(u.month_prompt_tokens))} · 输出 ${UI.escapeHtml(formatTokens(u.month_completion_tokens))}</div>
+            <div class="stat-hint">命中 ${UI.escapeHtml(formatTokens(u.month_cache_hit_tokens))} · 未命中 ${UI.escapeHtml(formatTokens(u.month_cache_miss_tokens))} · 输出 ${UI.escapeHtml(formatTokens(u.month_completion_tokens))}</div>
           </div>
           <div class="stat-card">
             <div class="stat-label">本月消费</div>
@@ -55,14 +58,14 @@
             <div class="stat-hint">${UI.escapeHtml(Number(u.total_calls || 0).toLocaleString())} 次模型调用</div>
           </div>
           <div class="stat-card">
-            <div class="stat-label">单价</div>
-            <div class="stat-value">${UI.escapeHtml(formatMoney(price))}</div>
-            <div class="stat-hint">每百万 token${reached ? " · 已达限额" : ""}</div>
+            <div class="stat-label">输入单价</div>
+            <div class="stat-value">${UI.escapeHtml(formatMoney(hitPrice))}</div>
+            <div class="stat-hint">命中/百万 · 未命中 ${UI.escapeHtml(formatMoney(missPrice))} · 输出 ${UI.escapeHtml(formatMoney(outputPrice))}</div>
           </div>
         </div>
         <div class="progress mt-14"><span style="width:${percent.toFixed(1)}%"></span></div>
         <p class="form-help mt-14">
-          ${price > 0 ? "消费为估算值，实际以模型服务商账单为准。" : "尚未设置百万 token 单价，消费按 ¥0.00 显示。"}
+          ${hasPrice ? "消费为估算值，实际以模型服务商账单为准。" : "尚未设置缓存命中/未命中/输出单价，消费按 ¥0.00 显示。"}
           达到限额后新的模型调用会被阻止。
         </p>
       </div>`;

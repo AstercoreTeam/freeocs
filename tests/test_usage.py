@@ -40,6 +40,33 @@ def test_usage_records_cost_and_persists(tmp_path) -> None:
     assert reloaded.summary()["total_tokens"] == 1_000_000
 
 
+def test_cache_hit_miss_pricing(tmp_path) -> None:
+    settings = SettingsStore(tmp_path / "settings.json")
+    settings.save_section(
+        "usage",
+        {
+            "cache_hit_price_per_million": 0.5,
+            "cache_miss_price_per_million": 2.0,
+            "output_price_per_million": 8.0,
+            "monthly_limit": 10.0,
+        },
+    )
+    usage = UsageStore(tmp_path / "usage.json", settings)
+    usage.record(
+        {
+            "prompt_tokens": 1_000_000,
+            "completion_tokens": 100_000,
+            "total_tokens": 1_100_000,
+            "prompt_tokens_details": {"cached_tokens": 600_000},
+        },
+        model="m",
+    )
+    summary = usage.summary()
+    assert summary["month_cache_hit_tokens"] == 600_000
+    assert summary["month_cache_miss_tokens"] == 400_000
+    assert summary["month_cost"] == pytest.approx(1.9)
+
+
 def test_limit_blocks_next_call(tmp_path) -> None:
     usage = make_usage(tmp_path, price=2.0, limit=2.0)
     usage.record({"total_tokens": 1_000_000}, model="m")

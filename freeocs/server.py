@@ -339,6 +339,9 @@ class _Handler(BaseHTTPRequestHandler):
             except BridgeError as exc:
                 return self._error(504, str(exc), "BRIDGE_ERROR")
             return self._json({"ok": True, "tabs": tabs})
+        if path == "/api/events":
+            limit = int((parse_qs(parsed.query).get("limit") or ["200"])[0] or 200)
+            return self._json({"ok": True, **self.server.app.events.since(0, limit=limit)})
         if path == "/api/page":
             try:
                 info = self.server.app.bridge.page_info(timeout=15)

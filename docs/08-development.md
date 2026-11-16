@@ -56,7 +56,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-asr = ["faster-whisper>=1.2,<2", "av>=13"]
+asr = ["faster-whisper>=1.2,<2", "av>=15,<16"]
 ocr = ["rapidocr-onnxruntime>=1.4", "pillow>=10"]
 tts = ["pyttsx3>=2.90,<3", "edge-tts>=6.1"]
 dev = ["pytest>=8", "pytest-timeout>=2", "ruff>=0.6", "pyinstaller>=6.6"]

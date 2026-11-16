@@ -18,7 +18,7 @@
       "description": "CPU/GPU 本地转写"
     }
   },
-  "dependencies": ["faster-whisper>=1.2,<2", "av>=13"],
+  "dependencies": ["faster-whisper>=1.2,<2", "av>=15,<16"],
   "settings": [
     {
       "id": "asr_whisper",

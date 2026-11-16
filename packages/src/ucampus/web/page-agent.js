@@ -4,6 +4,18 @@
   if (globalThis.__freeocs_ucampus_loaded__) return;
   globalThis.__freeocs_ucampus_loaded__ = true;
   try { document.documentElement.dataset.freeocsUcampus = "1"; } catch (error) {}
+  try {
+    window.addEventListener("error", (event) => {
+      document.documentElement.dataset.freeocsAgentError =
+        `${event.message || "error"} @ ${event.filename || ""}:${event.lineno || 0}`;
+    });
+    window.addEventListener("unhandledrejection", (event) => {
+      document.documentElement.dataset.freeocsAgentError =
+        `unhandled: ${event.reason && (event.reason.stack || event.reason.message) || event.reason}`;
+    });
+  } catch (_) {
+    // Ignore diagnostic failures.
+  }
 
   // The portal tab also matches *.unipus.cn, but it must not compete with the
   // course tab for the single automation client slot.
@@ -30,6 +42,7 @@
     }
   }
 
+  const SUBMIT_HANDOFF_KEY = "ucampusAssistantSubmitHandoff";
   const CLIENT_ID_KEY = "ucampusAssistantClientId";
   const CLIENT_ID = gmGet(CLIENT_ID_KEY, "") || (() => {
     const id = `ucampus-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -45,6 +58,11 @@
   let courseStartAttempted = false;
   let controllerPolling = false;
   let manualStop = false;
+  let submitHandoff = null;
+  let submitWatcherRunning = false;
+  let panelAnswer = "";
+  let panelAnswerLabel = "";
+  let panelAnswerUrl = "";
   let backendConnected = false;
   let currentStatus = "已连接，等待控制台";
   let runState = loadRunState();
@@ -420,10 +438,14 @@
               String.fromCharCode(65 + index),
           }))
           .filter((option) => option.text);
+        const groupText = (group.innerText || "").slice(0, 1000);
         return {
           element: group,
           stem: group.querySelector(".ques-title")?.innerText?.trim() || "",
           options,
+          multi: Boolean(group.querySelector(
+            "[role='checkbox'], input[type='checkbox'], .checkbox, .check-box"
+          )) || /multiple|choose all|select all|多选|选出所有|所有正确/i.test(groupText),
         };
       })
       .filter((group) => group.options.length >= 2);
@@ -456,6 +478,100 @@
       .filter((item) => item.trigger && item.options.length >= 2);
   }
 
+  const answeredRadioKeys = new Set();
+
+  function radioGroupKey(group) {
+    return [location.href, group.name, group.stem,
+      group.options.map((option) => option.text).join("|")].join("|");
+  }
+
+  function checkboxGroups(doc) {
+    const boxes = [...doc.querySelectorAll("input[type='checkbox'], [role='checkbox']")]
+      .filter((element) => controlVisible(element) &&
+        !element.closest("#uca-panel, #freeocs-ucampus-panel") &&
+        !element.closest("header, nav, [class*='notes'], [class*='search']") &&
+        element.closest(".question-common-abs-choice, .question-basic, [class*='question'], .item"));
+    const byName = new Map();
+    for (const box of boxes) {
+      const container = box.closest(
+        ".question-common-abs-choice, .question-basic, [class*='question-item'], " +
+        "[class*='questionItem'], [class*='question'], .item"
+      );
+      const name = box.name || box.getAttribute("name");
+      const key = name || container || box;
+      if (!byName.has(key)) byName.set(key, []);
+      byName.get(key).push(box);
+    }
+    const groups = [];
+    for (const [groupKey, inputs] of byName) {
+      if (inputs.length < 2) continue;
+      const options = inputs.map((input, index) => {
+        const label = input.labels?.[0] || input.closest("label");
+        const text = label?.innerText?.trim() || input.getAttribute("aria-label") ||
+          input.parentElement?.innerText?.trim() || input.value || `选项 ${index + 1}`;
+        return { input, text: text.slice(0, 500) };
+      });
+      if (options.some((option) => !option.text)) continue;
+      const container = inputs[0].closest(
+        ".question-common-abs-choice, .question-basic, [class*='question-item'], " +
+        "[class*='questionItem'], [class*='question']"
+      );
+      groups.push({
+        name: typeof groupKey === "string" ? groupKey : "checkbox-group",
+        inputs,
+        options,
+        stem: (container?.innerText || questionForDocument(doc) || "")
+          .trim().slice(0, 2000),
+        element: container || doc.body,
+      });
+    }
+    return groups;
+  }
+
+  function radioGroups(doc) {
+    const radios = [...doc.querySelectorAll("input[type='radio'], [role='radio']")]
+      .filter((element) => controlVisible(element) &&
+        !element.closest("#uca-panel, #freeocs-ucampus-panel") &&
+        !element.closest("header, nav, [class*='notes'], [class*='search']"));
+    const byName = new Map();
+    for (const radio of radios) {
+      const name = radio.name || radio.getAttribute("name");
+      const container = radio.closest(
+        ".question-common-abs-choice, .question-basic, [class*='question-item'], " +
+        "[class*='questionItem'], [class*='question']"
+      );
+      const key = name || container || radio;
+      if (!byName.has(key)) byName.set(key, []);
+      byName.get(key).push(radio);
+    }
+    const groups = [];
+    for (const [groupKey, inputs] of byName) {
+      if (inputs.length < 2) continue;
+      const options = inputs.map((input, index) => {
+        const label = input.labels?.[0] || input.closest("label");
+        const text = label?.innerText?.trim() || input.getAttribute("aria-label") ||
+          input.parentElement?.innerText?.trim() || input.value || `选项 ${index + 1}`;
+        return { input, text: text.slice(0, 500) };
+      });
+      if (options.some((option) => !option.text)) continue;
+      const container = inputs[0].closest(
+        ".question-common-abs-choice, .question-basic, [class*='question-item'], " +
+        "[class*='questionItem'], [class*='question']"
+      );
+      const stem = (container?.innerText || questionForDocument(doc) || "")
+        .trim().slice(0, 2000);
+      groups.push({
+        name: typeof groupKey === "string" ? groupKey : "radio-group",
+        inputs,
+        options,
+        stem,
+        element: container || doc.body,
+        answered: options.some((option) => option.input.checked),
+      });
+    }
+    return groups;
+  }
+
   function currentQuestion() {
     const selected = window.getSelection()?.toString().trim();
     if (selected) return selected.slice(0, 12000);
@@ -465,6 +581,22 @@
       if (!dropdowns.length) continue;
       const pending = dropdowns.find((item) =>
         !answeredDropdownKeys.has(dropdownKey(item))
+      );
+      return pending ? pending.stem : "";
+    }
+    for (const doc of pageDocuments()) {
+      const groups = checkboxGroups(doc);
+      if (!groups.length) continue;
+      const pending = groups.find((group) =>
+        !answeredChoiceKeys.has(choiceGroupKey(group))
+      );
+      return pending ? pending.stem : "";
+    }
+    for (const doc of pageDocuments()) {
+      const groups = radioGroups(doc);
+      if (!groups.length) continue;
+      const pending = groups.find((group) =>
+        !group.answered && !answeredRadioKeys.has(radioGroupKey(group))
       );
       return pending ? pending.stem : "";
     }
@@ -503,25 +635,37 @@
       if (/Start role-play/i.test(pageText)) {
         return { type: "roleplay", doc };
       }
-      const radios = [...doc.querySelectorAll("input[type='radio'], [role='radio']")]
-        .filter((element) => controlVisible(element) && !element.closest("#uca-panel, #freeocs-ucampus-panel"));
-      if (radios.length >= 2) {
-        const groups = new Set(
-          radios.map((radio) => radio.name || radio.getAttribute("name") || "default")
+      const checkboxGroupsInDoc = checkboxGroups(doc);
+      if (checkboxGroupsInDoc.length) {
+        const pending = checkboxGroupsInDoc.find((group) =>
+          !answeredChoiceKeys.has(choiceGroupKey(group))
         );
-        if (groups.size > 1) {
-          return { type: "unsupported", reason: "页面同时包含多个选择题选项组。" };
+        if (!pending) {
+          return { type: "unsupported", reason: "本页选择题已全部作答。" };
         }
-        const options = radios.map((input, index) => {
-          const label = input.labels?.[0] || input.closest("label");
-          const text = label?.innerText?.trim() || input.getAttribute("aria-label") ||
-            input.parentElement?.innerText?.trim() || input.value || `选项 ${index + 1}`;
-          return { input, text: text.slice(0, 500) };
-        });
-        if (options.some((option) => !option.text)) {
-          return { type: "unsupported", reason: "无法读取完整的选择题选项文本。" };
+        return {
+          type: "multi-choice",
+          options: pending.options,
+          group: pending,
+          groups: checkboxGroupsInDoc,
+          doc,
+        };
+      }
+      const radioGroupsInDoc = radioGroups(doc);
+      if (radioGroupsInDoc.length) {
+        const pending = radioGroupsInDoc.find((group) =>
+          !group.answered && !answeredRadioKeys.has(radioGroupKey(group))
+        );
+        if (!pending) {
+          return { type: "unsupported", reason: "本页选择题已全部作答。" };
         }
-        return { type: "choice", options, doc };
+        return {
+          type: "choice",
+          options: pending.options,
+          group: pending,
+          radioGroup: true,
+          doc,
+        };
       }
 
       const dropdowns = optionDropdowns(doc);
@@ -550,7 +694,7 @@
           return { type: "unsupported", reason: "本页选择题已全部作答。" };
         }
         return {
-          type: "choice",
+          type: group.multi ? "multi-choice" : "choice",
           options: group.options,
           group,
           groups: choiceGroups,
@@ -620,7 +764,18 @@
         if (words.length >= 2 && meanings.length === words.length) {
           return { type: "matching", words, meanings, wrapper: sortable, doc };
         }
-      }      const fields = [...doc.querySelectorAll(
+      }      const scoopInputs = [...doc.querySelectorAll(".comp-abs-input")]
+        .filter((element) =>
+          !element.closest("#uca-panel, #freeocs-ucampus-panel") &&
+          !element.closest("#mark-edit-in, [class*='notes'], [class*='search']") &&
+          element.closest(".question-common-abs-scoop, .question-basic, [class*='question']") &&
+          element.querySelector("input"))
+        .map((element) => element.querySelector("input"))
+        .filter((element) => element && !element.closest("#uca-panel, #freeocs-ucampus-panel"));
+      if (scoopInputs.length === 1) return { type: "blank", fields: scoopInputs, doc };
+      if (scoopInputs.length > 1) return { type: "blanks", fields: scoopInputs, doc };
+
+      const fields = [...doc.querySelectorAll(
         ".question-inputbox-input, .fe-scoop input, .comp-abs-input input, " +
         "textarea[placeholder], input[placeholder], " +
         "[contenteditable='true'][data-placeholder]"
@@ -762,8 +917,9 @@
       }).join("；");
       updateRunLog(`排序/匹配正确答案：${sequence}`, "info");
       updateRunLog(`对应关系：${pairs}`, "info");
-      setStatus(`正确答案：${sequence}（请手动拖拽，不会自动提交）`);
-      await waitingForManual(`排序/匹配答案：${sequence}；请手动拖拽后提交`);
+      setPanelAnswer(`${sequence}\n${pairs}`, "排序/匹配正确答案");
+      setStatus("请按面板答案手动拖拽，然后提交");
+      await waitingForManual("排序/匹配答案已显示在面板；请手动拖拽后提交");
       return;
     }
     if (controls.type === "dropdown") {
@@ -807,6 +963,24 @@
       answeredDropdownKeys.add(dropdownKey(pending));
       return;
     }
+    if (controls.type === "multi-choice") {
+      const letters = [...new Set((answer.toUpperCase().match(/\b[A-Z]\b/g) || []))];
+      const normalized = answer.toLocaleLowerCase();
+      const matched = controls.options.filter((option, index) => {
+        const letter = String.fromCharCode(65 + index);
+        return letters.includes(letter) ||
+          normalized.includes(option.text.toLocaleLowerCase());
+      });
+      if (!matched.length) throw new Error("模型答案无法与多选题选项匹配。");
+      for (const option of matched) {
+        option.input.click();
+        option.input.dispatchEvent(new Event("input", { bubbles: true }));
+        option.input.dispatchEvent(new Event("change", { bubbles: true }));
+        await wait(250);
+      }
+      if (controls.group) answeredChoiceKeys.add(choiceGroupKey(controls.group));
+      return;
+    }
     if (controls.type === "choice") {
       const normalized = answer.trim().toLocaleLowerCase();
       const matched = controls.options.find((option, index) => {
@@ -824,6 +998,7 @@
       matched.input.dispatchEvent(new Event("input", { bubbles: true }));
       matched.input.dispatchEvent(new Event("change", { bubbles: true }));
       if (controls.group) answeredChoiceKeys.add(choiceGroupKey(controls.group));
+      if (controls.radioGroup) answeredRadioKeys.add(radioGroupKey(controls.group));
       return;
     }
     if (controls.type === "blank") {
@@ -941,7 +1116,7 @@
   }
 
   function nextQuestionButton() {
-    const matcher = /^(下一题|下一步|下一页|下一节|下一课|继续学习|继续|完成并继续|next(?:\s+(?:question|step|lesson))?|continue)\s*[>›→]?$/i;
+    const matcher = /^(下一题|下一步|下一页|下一节|下一课|下一章|继续学习|继续|完成并继续|next(?:\s+(?:question|step|lesson|chapter))?|continue)\s*[>›→]?$/i;
     for (const doc of pageDocuments()) {
       const buttons = [...doc.querySelectorAll(
         "button, a, [role='button'], [class*='next'], [class*='Next']"
@@ -1760,6 +1935,15 @@
 
   function controlsAnswered(controls) {
     if (!controls) return false;
+    if (controls.type === "multi-choice" && controls.group &&
+      typeof controls.group.querySelector === "function") {
+      return Boolean(controls.group.querySelector(
+        "[class*='selected'], [class*='checked'], input:checked"
+      ));
+    }
+    if (controls.type === "choice" && controls.radioGroup) {
+      return Boolean(controls.options?.some((option) => option.input.checked));
+    }
     if (controls.type === "choice" && controls.group &&
       typeof controls.group.querySelector === "function") {
       return Boolean(controls.group.querySelector(
@@ -2115,7 +2299,7 @@
       `预计输入约 ${estimate.toLocaleString()} tokens（仅估算）。`,
       "是否继续？",
     ].join("\n\n");
-    const confirmed = typeof window.confirm === "function" ? window.confirm(message) : true;
+    const confirmed = typeof window.confirm === "function" ? window.confirm(message) : false;
     if (!confirmed) {
       updateRunLog("已取消 AI 网页兜底，未发送给模型", "warn");
       return false;
@@ -2189,6 +2373,22 @@
       return false;
     }
     if (dismissBlockingDialog()) await wait(400);
+    const initialQuestion = currentQuestion();
+    const initialControls = answerControls();
+    const initialVideo = videoForAutomation().video;
+    const initialVideoWithQuestions = Boolean(
+      initialVideo && initialQuestion &&
+      ["choice", "dropdown", "blank", "blanks", "oral"].includes(initialControls.type)
+    );
+    const initialAnswerable =
+      Boolean(initialQuestion && looksLikeQuestion(initialQuestion)) ||
+      initialControls.type !== "unsupported" ||
+      initialControls.type === "matching" ||
+      initialVideoWithQuestions;
+    if (hasSubmitAction() && !initialAnswerable && !hasQuestionInteractives()) {
+      await waitingForManual("当前页面已到提交步骤，等待手动提交");
+      return false;
+    }
     if (isDiscussionPage()) {
       const filled = await answerDiscussion();
       if (filled) {
@@ -2212,6 +2412,10 @@
     }
     if (previewControls.type === "dubbing") {
       await waitingForManual("朗读评分题需要录音提交，已停止；请手动完成");
+      return false;
+    }
+    if (previewControls.type === "unsupported" && isVoicePracticePage()) {
+      await waitingForManual("检测到朗读/配音/录音任务，请手动完成；完成提交后会自动继续");
       return false;
     }
     const detectedVideo = videoForAutomation();
@@ -2276,6 +2480,12 @@
         }
       }
     }
+    if (videoWithQuestions && !videoTranscript) {
+      await waitingForManual(
+        "视频音轨未能转写，无法依据视频内容作答；请配置 ASR 或手动完成"
+      );
+      return false;
+    }
 
     let audioTranscript = videoTranscript;
     const audioList = audioSources();
@@ -2337,7 +2547,7 @@
     }
 
     const question = currentQuestion();
-    if (submittedSteps.has(currentStepKey())) {
+    if (submittedSteps.has(currentStepKey()) && !hasSubmitAction()) {
       updateRunLog("该页已提交，跳过重复提交", "info");
       return { type: "content" };
     }
@@ -2362,6 +2572,10 @@
         return { type: "content" };
       }
       if (controls.type === "unsupported") {
+        if (isContentOnlyPage()) {
+          updateRunLog("当前为无题学习页，自动进入下一子模块", "info");
+          return { type: "content" };
+        }
         const handled = await runWebFallback(
           question || "",
           controls.reason || "未识别题型"
@@ -2435,10 +2649,141 @@
     return { type: "question" };
   }
 
+  function isSubmitControl(element) {
+    if (!element || element.closest("#uca-panel, #freeocs-ucampus-panel")) return false;
+    if (element.matches?.(".submit-btn, [class*='submit-btn']") ||
+      element.closest?.(".submit-btn, [class*='submit-btn']")) {
+      return true;
+    }
+    const label = (element.innerText || element.textContent ||
+      element.getAttribute("aria-label") || element.getAttribute("title") ||
+      element.value || "").replace(/\s+/g, "");
+    return ["提交", "交卷", "提交答案", "保存并提交", "确定提交", "发布", "评分提交"]
+      .some((word) => label === word || label === `${word}答案`);
+  }
+
+  function discussionEditorText() {
+    for (const doc of pageDocuments()) {
+      const editor = doc.querySelector(
+        "textarea[placeholder*='评论'], [contenteditable='true'][data-placeholder*='评论'], " +
+        ".discussion-cloud-recordList-title textarea"
+      ) || doc.querySelector("textarea[placeholder]");
+      if (editor && visible(editor)) {
+        return String(editor.value || editor.textContent || "").trim().slice(0, 500);
+      }
+    }
+    return "";
+  }
+
+  function discussionItemCount() {
+    return pageDocuments().reduce((count, doc) =>
+      count + doc.querySelectorAll("[class*='discussion-cloud-recordList-item']").length, 0);
+  }
+
+  function pageSignature() {
+    const tabs = contentTabs().filter((tab) => tab.active)
+      .map((tab) => tab.label).join("|");
+    const tasks = courseTasks();
+    const taskIndex = activeCourseTask(tasks);
+    const task = tasks[taskIndex]
+      ? `${tasks[taskIndex].label}|${tasks[taskIndex].status}`
+      : "";
+    const question = currentQuestion().slice(0, 300);
+    return [location.href, document.title, task, tabs, question,
+      answerControls().type, hasSubmitAction(), discussionEditorText(),
+      discussionItemCount()].join("|");
+  }
+
+  function clearSubmitHandoff(reason = "") {
+    submitHandoff = null;
+    gmSet(SUBMIT_HANDOFF_KEY, null);
+    if (reason) updateRunLog(reason, "warn");
+  }
+
+  function armSubmitHandoff(label) {
+    if (submitHandoff) return;
+    submitHandoff = {
+      signature: pageSignature(),
+      at: Date.now(),
+      url: location.href,
+      label: label || "提交",
+    };
+    gmSet(SUBMIT_HANDOFF_KEY, submitHandoff);
+    manualStop = true;
+    automationRunning = false;
+    updateRunLog(`检测到你点击“${label || "提交"}”，等待页面切换后自动继续`);
+    setStatus("已检测到提交，等待页面切换…");
+    void watchSubmitHandoff();
+  }
+
+  async function watchSubmitHandoff() {
+    if (submitWatcherRunning) return;
+    submitWatcherRunning = true;
+    try {
+      while (submitHandoff) {
+        await wait(1000);
+        const handoff = submitHandoff;
+        if (!handoff) break;
+        if (Date.now() - handoff.at > 180000) {
+          clearSubmitHandoff("提交后 3 分钟没有检测到页面切换，自动继续已取消");
+          break;
+        }
+        if (submitDialogVisible()) continue;
+        if (pageSignature() === handoff.signature) continue;
+
+        for (let retry = 0; retry < 15; retry += 1) {
+          if (hasContentForAutomation() || nextLearningTarget(true) || hasSubmitAction()) break;
+          await wait(1000);
+        }
+        if (submitDialogVisible()) continue;
+        if (isDiscussionPage()) {
+          // Publishing clears/moves the comment editor but stays on the same
+          // discussion page.  Move to the next section/tab explicitly.
+          const afterPublish = nextLearningTarget(true);
+          if (afterPublish) {
+            updateRunLog(`发布后进入下一项：${afterPublish.label}`, "info");
+            afterPublish.element.click();
+            await wait(1800);
+            if (!hasContentForAutomation() && !nextLearningTarget(true)) continue;
+          }
+        }
+        if (!hasContentForAutomation() && !nextLearningTarget(true) && !hasSubmitAction()) {
+          continue;
+        }
+        if (!hasContentForAutomation()) {
+          const next = nextLearningTarget(true);
+          if (!next) continue;
+          updateRunLog(`提交后进入下一项：${next.label}`, "info");
+          next.element.click();
+          await wait(1500);
+          if (!hasContentForAutomation()) continue;
+        }
+
+        clearSubmitHandoff();
+        manualStop = false;
+        courseStartAttempted = false;
+        updateRunLog("提交后页面已切换，自动开始下一模块", "success");
+        setStatus("正在自动开始下一个模块…");
+        try {
+          await request("/api/module/ucampus/start", { reason: "submit-handoff" });
+        } catch (error) {
+          updateRunLog(`自动开始下一模块失败：${error.message}`, "error");
+          return;
+        }
+        if (isCourseDetailPage()) await startFromCourseDetail();
+        else await runAutomation();
+        return;
+      }
+    } finally {
+      submitWatcherRunning = false;
+    }
+  }
+
   async function runAutomation() {
     if (automationRunning) return;
     runState = loadRunState();
     automationRunning = true;
+    clearPanelAnswer();
     const visited = new Set();
     updateRunLog("开始自动学习");
     if (automationIntro) {
@@ -2586,6 +2931,7 @@
   async function handleControllerCommand(command) {
     if (command.action === "start") {
       if (automationRunning) return;
+      clearSubmitHandoff();
       manualStop = false;
       runState = { completed: 0, entries: [] };
       gmSet(RUN_STATE_KEY, runState);
@@ -2594,6 +2940,7 @@
       return;
     }
     if (command.action === "stop") {
+      clearSubmitHandoff();
       automationRunning = false;
       setStatus("控制台已请求停止。");
       updateRunLog("收到控制台停止指令");
@@ -2625,6 +2972,41 @@
 
   let controlPanelCollapsed = false;
 
+  function renderPanelAnswer() {
+    if (window.top !== window.self) return;
+    const host = document.getElementById("freeocs-ucampus-panel");
+    if (!host) return;
+    const wrap = host.querySelector('[data-foc="answer-wrap"]');
+    const label = host.querySelector('[data-foc="answer-label"]');
+    const body = host.querySelector('[data-foc="answer"]');
+    if (!wrap || !label || !body) return;
+    wrap.hidden = !panelAnswer;
+    label.textContent = panelAnswerLabel || "排序答案";
+    body.textContent = panelAnswer || "";
+  }
+
+  function setPanelAnswer(text, label = "排序答案") {
+    panelAnswer = String(text || "").trim();
+    panelAnswerLabel = label;
+    panelAnswerUrl = location.href;
+    renderPanelAnswer();
+    if (panelAnswer) {
+      const host = document.getElementById("freeocs-ucampus-panel");
+      if (host && host.classList.contains("collapsed")) {
+        controlPanelCollapsed = false;
+        host.classList.remove("collapsed");
+        gmSet("panelCollapsed", false);
+      }
+    }
+  }
+
+  function clearPanelAnswer() {
+    panelAnswer = "";
+    panelAnswerLabel = "";
+    panelAnswerUrl = "";
+    renderPanelAnswer();
+  }
+
   function createControlPanel() {
     try {
       if (window.top !== window.self) return null;
@@ -2644,6 +3026,10 @@
         <div class="foc-body">
           <div class="foc-status" data-foc="status">正在连接 FreeOCS…</div>
           <div class="foc-hint" data-foc="hint"></div>
+          <div class="foc-answer-wrap" data-foc="answer-wrap" hidden>
+            <div class="foc-answer-label" data-foc="answer-label">排序答案</div>
+            <div class="foc-answer" data-foc="answer"></div>
+          </div>
           <div class="foc-actions">
             <button type="button" class="foc-start" data-foc="start">开始</button>
             <button type="button" class="foc-stop" data-foc="stop">停止</button>
@@ -2655,6 +3041,7 @@
       style.textContent = `
         #freeocs-ucampus-panel{all:initial;position:fixed;z-index:2147483647;right:14px;bottom:14px;width:286px;box-sizing:border-box;padding:0;border:1px solid #cfd8e6;border-radius:10px;background:#fff;color:#172033;box-shadow:0 8px 30px rgba(20,35,70,.18);font:12px/1.45 system-ui,-apple-system,"Segoe UI","Noto Sans CJK SC",sans-serif;overflow:hidden;pointer-events:auto;}
         #freeocs-ucampus-panel *{box-sizing:border-box;}
+        #freeocs-ucampus-panel [hidden]{display:none !important;}
         #freeocs-ucampus-panel .foc-head{display:flex;align-items:center;gap:6px;padding:8px 10px;background:#f5f7fb;border-bottom:1px solid #e3e8f0;cursor:default;user-select:none;}
         #freeocs-ucampus-panel .foc-head strong{font-size:12px;color:#172033;white-space:nowrap;}
         #freeocs-ucampus-panel .foc-dot{width:7px;height:7px;border-radius:50%;background:#98a2b3;flex:0 0 auto;}
@@ -2667,6 +3054,9 @@
         #freeocs-ucampus-panel.collapsed .foc-body{display:none;}
         #freeocs-ucampus-panel .foc-status{font-size:12px;color:#172033;min-height:18px;word-break:break-word;}
         #freeocs-ucampus-panel .foc-hint{margin-top:3px;color:#68748a;font-size:11px;min-height:15px;word-break:break-word;}
+        #freeocs-ucampus-panel .foc-answer-wrap{margin-top:8px;padding:7px 8px;border-left:3px solid #2f6fed;border-radius:5px;background:#f4f7ff;}
+        #freeocs-ucampus-panel .foc-answer-label{font-size:10px;color:#68748a;margin-bottom:3px;}
+        #freeocs-ucampus-panel .foc-answer{font-size:12px;line-height:1.5;color:#172033;white-space:pre-wrap;word-break:break-word;max-height:150px;overflow:auto;user-select:text;}
         #freeocs-ucampus-panel .foc-actions{display:flex;gap:6px;margin-top:8px;}
         #freeocs-ucampus-panel button{font:inherit;border-radius:6px;cursor:pointer;padding:5px 9px;}
         #freeocs-ucampus-panel .foc-start{border:1px solid #2f6fed;background:#2f6fed;color:#fff;}
@@ -2676,7 +3066,8 @@
         @media (prefers-color-scheme: dark){
           #freeocs-ucampus-panel{background:#1a2130;color:#e7edf7;border-color:#3a4760;}
           #freeocs-ucampus-panel .foc-head{background:#202838;border-color:#2b3548;}
-          #freeocs-ucampus-panel .foc-head strong,#freeocs-ucampus-panel .foc-status{color:#e7edf7;}
+          #freeocs-ucampus-panel .foc-head strong,#freeocs-ucampus-panel .foc-status,#freeocs-ucampus-panel .foc-answer{color:#e7edf7;}
+          #freeocs-ucampus-panel .foc-answer-wrap{background:#202838;border-left-color:#6ea0ff;}
           #freeocs-ucampus-panel .foc-stop{background:#1a2130;color:#e7edf7;border-color:#3a4760;}
         }`;
       document.documentElement.appendChild(style);
@@ -2692,9 +3083,16 @@
         gmSet("panelCollapsed", controlPanelCollapsed);
       });
       host.classList.toggle("collapsed", controlPanelCollapsed);
+      renderPanelAnswer();
       return host;
     } catch (error) {
       console.warn("[FreeOCS] control panel failed", error);
+      try {
+        document.documentElement.dataset.freeocsPanelError =
+          String(error && (error.stack || error.message) || error);
+      } catch (_) {
+        // Ignore diagnostic failures.
+      }
       return null;
     }
   }
@@ -2731,6 +3129,10 @@
     const start = host.querySelector('[data-foc="start"]');
     const stop = host.querySelector('[data-foc="stop"]');
     const pageEl = host.querySelector('[data-foc="page"]');
+    if (panelAnswer && panelAnswerUrl && location.href !== panelAnswerUrl) {
+      clearPanelAnswer();
+    }
+    renderPanelAnswer();
     dot.className = `foc-dot ${active ? (lease ? "on" : "wait") : ""}`;
     if (statusEl) {
       statusEl.textContent = response?.status || (active ? "运行中" : "未开始");
@@ -2747,6 +3149,53 @@
       start.textContent = active && !lease ? "接管本页" : "开始";
     }
     if (stop) stop.disabled = !active;
+  }
+
+  function isVoicePracticePage() {
+    for (const doc of pageDocuments()) {
+      const text = (doc.body?.innerText || "").slice(0, 5000);
+      if (/dub the video|start recording|record your (?:voice|answer|conversation)|role[- ]?play|act out (?:the )?(?:conversation|dialogue)|speaking task|朗读|录音|配音/i.test(text)) {
+        return true;
+      }
+      const controls = [...doc.querySelectorAll(
+        ".button-record, .record-icon, [class*='dubbing'], [class*='record-button'], [aria-label*='record' i]"
+      )].some((element) => visible(element) &&
+        !element.closest("#uca-panel, #freeocs-ucampus-panel"));
+      if (controls) return true;
+    }
+    return false;
+  }
+
+  function hasQuestionInteractives() {
+    for (const doc of pageDocuments()) {
+      const nodes = [...doc.querySelectorAll(
+        "input, textarea, select, [contenteditable='true'], .option, " +
+        "[role='radio'], [role='checkbox']"
+      )];
+      if (nodes.some((element) => visible(element) &&
+        !element.closest("#uca-panel, #freeocs-ucampus-panel") &&
+        !element.closest("#mark-edit-in, [class*='notes'], [class*='search']") &&
+        !/search|搜索|笔记|note/i.test(element.getAttribute("placeholder") || ""))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function isContentOnlyPage() {
+    if (isCourseDetailPage()) return false;
+    const controls = answerControls();
+    if (controls.type !== "unsupported") return false;
+    if (hasSubmitAction() || isDiscussionPage()) return false;
+    if (videoForAutomation().video || audioSources().length) return false;
+    const question = currentQuestion();
+    if (question && looksLikeQuestion(question)) return false;
+    return Boolean(
+      nextSectionTab() ||
+      contentTabs().length > 1 ||
+      practiceTab() ||
+      pageActionButton()
+    );
   }
 
   function hasContentForAutomation() {
@@ -2814,13 +3263,47 @@
     }
   }
 
+  function installSubmitWatcher() {
+    if (window.top !== window.self) return;
+    const onPress = (event) => {
+      const target = event.target?.closest?.("a, button, [role='button'], .submit-btn");
+      if (!target || !isSubmitControl(target)) return;
+      const label = (target.innerText || target.textContent ||
+        target.getAttribute("aria-label") || "提交")
+        .trim().replace(/\s+/g, " ");
+      armSubmitHandoff(label);
+    };
+    document.addEventListener("pointerdown", onPress, true);
+    document.addEventListener("click", onPress, true);
+  }
+
+  function restoreSubmitHandoff() {
+    if (window.top !== window.self) return;
+    const saved = gmGet(SUBMIT_HANDOFF_KEY, null);
+    if (saved && typeof saved.at === "number" && Date.now() - saved.at < 180000) {
+      submitHandoff = saved;
+      manualStop = true;
+      window.setTimeout(() => void watchSubmitHandoff(), 1500);
+    } else if (saved) {
+      gmSet(SUBMIT_HANDOFF_KEY, null);
+    }
+  }
+
+  installSubmitWatcher();
+  try {
+    document.documentElement.dataset.freeocsPanelInit = "1";
+  } catch (_) {
+    // Ignore diagnostic failures.
+  }
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => {
       createControlPanel();
+      restoreSubmitHandoff();
       void pollController();
     }, { once: true });
   } else {
     createControlPanel();
+    restoreSubmitHandoff();
     void pollController();
   }
   window.setInterval(pollController, 1500);

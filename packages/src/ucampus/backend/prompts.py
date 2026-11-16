@@ -8,6 +8,7 @@ from typing import Any
 
 TYPE_LABELS = {
     "choice": "选择题",
+    "multi-choice": "多选题",
     "dropdown": "下拉选择题",
     "blank": "填空题",
     "blanks": "多空填空题",
@@ -30,7 +31,13 @@ def build_prompt(payload: dict[str, Any]) -> str:
         parts.append("选项：\n" + "\n".join(str(item) for item in options))
     if context.strip():
         parts.append(f"补充材料：\n{context}")
-    if question_type == "matching":
+    if question_type == "multi-choice":
+        parts.append(
+            "这是多选题。answer 输出所有正确选项的字母，用逗号或空格分隔，"
+            "例如 A, C。不要只给一个选项。"
+        )
+        parts.append('仅返回 JSON 对象，格式为 {"answer":"...","explanation":"..."}。')
+    elif question_type == "matching":
         if re.search(r"arrange|order|sort|排序|顺序", question, re.IGNORECASE):
             parts.append(
                 "这是排序题。请根据文章内容，按正确顺序输出 A-F 的字母，"

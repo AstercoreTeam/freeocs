@@ -28,7 +28,7 @@ FreeOCS 会统计所有通过 `llm.chat` 能力发起的模型调用，并按用
 
 ```text
 usage.json
-├── totals         累计 prompt/completion/total/calls
+├── totals         累计 prompt/completion/cache_hit/cache_miss/total/calls
 ├── months         按 YYYY-MM 保存每月 token
 ├── models         按模型保存 token/calls
 └── recent         最近 50 次调用的 token 明细
@@ -36,19 +36,33 @@ usage.json
 
 只保存 token 数量，不保存对话内容。
 
+缓存字段来源：
+
+- `prompt_tokens_details.cached_tokens`
+- `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`
+- `cache_read_input_tokens` / `cache_creation_input_tokens`
+
+没有缓存字段时，输入 token 全部按“未命中”计。
+
 ## 3. 单价与消费
 
 设置 → Token 消耗：
 
 | 字段 | 说明 |
 | --- | --- |
-| 百万 token 单价（元） | 例如 2 表示每 1,000,000 token 2 元；0 表示只统计不计费 |
+| 缓存命中输入单价（元/百万 token） | 命中缓存的输入 token 单价 |
+| 缓存未命中输入单价（元/百万 token） | 未命中缓存的输入 token 单价 |
+| 输出 token 单价（元/百万 token） | 模型输出 token 单价；0 表示沿用未命中单价 |
+| 统一兜底单价（旧配置） | 高级项，兼容旧配置；三类单价为 0 时使用 |
 | 每月消费限额（元） | 0 表示不限制；达到限额后阻止新的模型调用 |
 
 消费计算公式：
 
 ```text
-cost = total_tokens / 1_000_000 × price_per_million
+cost =
+  cache_hit_tokens  / 1,000,000 × hit_price
++ cache_miss_tokens / 1,000,000 × miss_price
++ output_tokens      / 1,000,000 × output_price
 ```
 
 修改单价后，历史记录按新单价重新估算显示；实际账单以模型服务商为准。
@@ -57,11 +71,11 @@ cost = total_tokens / 1_000_000 × price_per_million
 
 首页新增「Token 消耗」卡片：
 
-- 本月 token（输入/输出）
+- 本月 token（缓存命中/未命中/输出）
 - 本月消费
 - 本月限额与剩余
 - 累计 token、调用次数
-- 当前百万 token 单价
+- 缓存命中、未命中、输出单价
 - 限额进度条
 - 达到限额时红色提示
 
@@ -88,6 +102,7 @@ cost = total_tokens / 1_000_000 × price_per_million
 2. 页面弹出确认框，显示预计输入 token（粗略估算）
 3. 用户确认后才发送给模型
 4. 取消时不调用模型、不消耗 token
+5. 确认框为页面原生 `confirm`，显示预计输入 token
 
 这一确认只针对“整页 AI 兜底”，普通逐题作答不重复确认。
 
