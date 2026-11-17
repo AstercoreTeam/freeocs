@@ -8,6 +8,9 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+# Import before platform monkeypatching: PyInstaller initializes platform
+# helpers at import time, which the build tests intentionally override.
+import PyInstaller  # noqa: F401
 import pytest
 
 from scripts import build_app
@@ -18,7 +21,7 @@ def test_windows_build_does_not_collect_gtk(monkeypatch: pytest.MonkeyPatch) -> 
 
     def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
         commands.append(command)
-        return subprocess.CompletedProcess(command, 0)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(build_app.sys, "platform", "win32")
     monkeypatch.setattr(build_app.subprocess, "run", fake_run)
@@ -36,7 +39,7 @@ def test_linux_build_collects_gtk(monkeypatch: pytest.MonkeyPatch) -> None:
 
     def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
         commands.append(command)
-        return subprocess.CompletedProcess(command, 0)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(build_app.sys, "platform", "linux")
     monkeypatch.setattr(build_app.subprocess, "run", fake_run)
