@@ -32,7 +32,7 @@
     }, timeout);
   }
 
-  function modal({ title, message, confirmText = "确定", cancelText = "取消", danger = false }) {
+  function modal({ title, message, confirmText = "确定", cancelText = "取消", danger = false, extraText = "" }) {
     return new Promise((resolve) => {
       const root = document.getElementById("modal-root");
       root.innerHTML = "";
@@ -45,6 +45,7 @@
         <p>${escapeHtml(message || "")}</p>
         <div class="modal-actions">
           <button class="btn btn-ghost" data-modal-cancel>${escapeHtml(cancelText)}</button>
+          ${extraText ? `<button class="btn" data-modal-extra>${escapeHtml(extraText)}</button>` : ""}
           <button class="btn ${danger ? "btn-danger" : "btn-primary"}" data-modal-ok>${escapeHtml(confirmText)}</button>
         </div>`;
       mask.appendChild(box);
@@ -55,6 +56,8 @@
       };
       box.querySelector("[data-modal-cancel]").addEventListener("click", () => close(false));
       box.querySelector("[data-modal-ok]").addEventListener("click", () => close(true));
+      const extra = box.querySelector("[data-modal-extra]");
+      if (extra) extra.addEventListener("click", () => close("extra"));
       mask.addEventListener("click", (event) => {
         if (event.target === mask) close(false);
       });

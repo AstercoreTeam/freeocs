@@ -15,6 +15,7 @@ import time
 import webbrowser
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from . import voice_samples
 from .browser_launcher import find_browsers
@@ -141,6 +142,7 @@ class UiApi:
                 reports=reports,
                 folder=str(self.app.paths.data_dir / "package-data" / "ucampus" / "reports"),
                 issue="https://github.com/AstercoreTeam/freeocs/issues",
+                email="support@astercore.dpdns.org",
             )
         except Exception as exc:  # noqa: BLE001
             return self._fail(exc)
@@ -156,7 +158,26 @@ class UiApi:
             else:
                 subprocess.Popen(["xdg-open", str(folder)])
             webbrowser.open("https://github.com/AstercoreTeam/freeocs/issues")
-            return self._ok(folder=str(folder), issue="https://github.com/AstercoreTeam/freeocs/issues")
+            return self._ok(
+                folder=str(folder),
+                issue="https://github.com/AstercoreTeam/freeocs/issues",
+                email="support@astercore.dpdns.org",
+            )
+        except Exception as exc:  # noqa: BLE001
+            return self._fail(exc)
+
+    def open_report_email(self) -> dict[str, Any]:
+        try:
+            email = "support@astercore.dpdns.org"
+            subject = quote("FreeOCS AI 报告提交")
+            body = quote(
+                "请把 FreeOCS 生成的 AI 报告 zip 作为附件发送。\n\n"
+                "报告目录："
+                f"{self.app.paths.data_dir / 'package-data' / 'ucampus' / 'reports'}\n\n"
+                "请在邮件中简单描述页面和问题。"
+            )
+            webbrowser.open(f"mailto:{email}?subject={subject}&body={body}")
+            return self._ok(email=email)
         except Exception as exc:  # noqa: BLE001
             return self._fail(exc)
 

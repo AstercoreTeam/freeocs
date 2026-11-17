@@ -11,6 +11,7 @@ import base64
 import binascii
 import hashlib
 import json
+import re
 import threading
 import time
 import uuid
@@ -460,6 +461,8 @@ class UcampusModule(Module):
         reason = str(payload.get("reason", "") or "")[:1000]
         question = str(payload.get("question", "") or "")[:12000]
         text = str(payload.get("text", "") or "")[:12000]
+        report_only = bool(payload.get("report_only"))
+        force_action = bool(payload.get("force_action")) and not report_only
         elements = payload.get("elements")
         if not isinstance(elements, list):
             elements = []
@@ -477,21 +480,30 @@ class UcampusModule(Module):
             }
 
         lines = [
-            "页面自动识别失败，请根据题目和页面元素决定如何作答。",
+            "你是给 FreeOCS 开发者写页面分析报告的助手。请分析这个 U校园 页面，告诉开发者它是什么页面、DOM 如何组织、为什么自动识别失败、应该怎样适配。",
             f"页面：{title} {url}",
-            f"原因：{reason}",
-            f"题目：{question or '(未提取到题目文本)'}",
+            f"失败原因：{reason}",
+            f"当前题目文本：{question or '(未提取到题目文本)'}",
             f"页面文本：\n{text}",
             "可操作元素（只能使用这些 index）：",
             json.dumps(elements, ensure_ascii=False)[:12000],
+            "报告要求：用中文 Markdown，写给开发者，不要写给普通用户；必须说明页面类型/交互模型、关键 DOM 结构与 class/selector、控制项（选项/输入/下拉/音频/按钮）、识别失败原因、建议的 Agent 修改点、风险与安全边界。",
+            ("这是兼容性报告模式：只分析页面并生成报告，绝对不要执行任何页面操作，actions 必须为空。重点说明页面为什么无法被当前 Agent 识别、DOM 结构、建议新增的适配点。")
+            if report_only else
+            ("这是用户主动点击的 AI直接作答。页面可能是任意交互页面，"
+             "只要存在可点击控件、选项、tab、播放/录音控件或输入控件，"
+             "actions 必须至少包含一个最可能正确的安全操作（click/set_value/select），"
+             "不能只返回 report 或 actions=[]；不确定时也必须给出最佳猜测。"
+             "仍然绝对禁止点击提交、交卷、发布、评分提交等按钮。")
+            if force_action else
+            "如果无法确定，actions 可以为空，并在 report 中说明。",
+            ("同时给出安全操作计划；规则：最多 6 个动作；click 用于按钮/选项/标签；set_value 用于输入框；select 用于下拉框；绝对不能点击提交、交卷、发布、确定提交、评分提交等不可逆按钮；无法确定时 actions 为空。")
+            if not report_only else
+            "兼容性报告模式不要输出任何 action。",
             "只返回 JSON：",
-            '{"actions":[{"type":"click","index":0,"reason":"..."},'
-            '{"type":"set_value","index":1,"value":"..."}],'
-            '"answer":"...","explanation":"..."}',
-            "规则：最多 6 个动作；click 用于按钮/选项/标签；set_value 用于输入框；"
-            "select 用于下拉框（value 可为选项文本）；"
-            "绝对不能点击提交、交卷、发布、确定提交、评分提交等不可逆按钮；"
-            "如果无法确定，actions 为空并在 explanation 说明。",
+            '{"report":"给开发者的 Markdown 报告",'
+            '"actions":[{"type":"click","index":0,"reason":"..."}],'
+            '"answer":"可选答案","explanation":"给用户的简短说明"}',
         ]
         prompt = "\n\n".join(lines)
         try:
@@ -502,17 +514,48 @@ class UcampusModule(Module):
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.1,
+                max_tokens=8192,
                 timeout=float(self.ctx.settings.get("answer_timeout", 300) or 300),
             )
             raw = str((result.message or {}).get("content") or "")
+            if not raw.strip():
+                raise ModuleError(
+                    "模型只返回推理内容，未返回正文操作计划；请增大模型最大输出或改用 deepseek-chat"
+                )
             plan = parse_json_object(raw)
-            actions = self._validate_page_actions(plan.get("actions"), elements)
+            actions = [] if report_only else self._validate_page_actions(plan.get("actions"), elements)
             answer = str(plan.get("answer", "") or "")[:5000]
             explanation = str(plan.get("explanation", "") or "")[:2000]
+            ai_report = str(plan.get("report", "") or "")[:20000]
+            if force_action and not actions:
+                # Last-resort deterministic action: never leave a forced AI
+                # answer as report-only when safe option/input targets exist.
+                answer_letter = ""
+                match = re.search(r"(?<![A-Za-z])([A-Da-d])(?![A-Za-z])", answer)
+                if match:
+                    answer_letter = match.group(1).upper()
+                candidates = [
+                    item for item in elements
+                    if item.get("kind") == "clickable"
+                    and not re.search(r"提交|交卷|发布|评分", str(item.get("text", "")))
+                ]
+                option = next(
+                    (item for item in candidates
+                     if answer_letter and str(item.get("text", "")).strip().upper().startswith(answer_letter)),
+                    candidates[0] if candidates else None,
+                )
+                if option is not None:
+                    actions = [{
+                        "type": "click",
+                        "index": option["index"],
+                        "reason": "AI 直接作答：模型未给出动作，选择首个安全选项",
+                    }]
             response = {
                 "actions": actions,
                 "answer": answer,
                 "explanation": explanation,
+                "ai_report": ai_report,
+                "report_only": report_only,
                 "page_path": page_path,
                 "raw": raw[:4000],
                 "model": str((result.message or {}).get("model", "") or ""),
@@ -526,6 +569,7 @@ class UcampusModule(Module):
                 "actions": [],
                 "answer": "",
                 "explanation": "",
+                "ai_report": "",
                 "page_path": page_path,
                 "error": str(exc),
             }
@@ -537,22 +581,18 @@ class UcampusModule(Module):
     def _ai_report_text(payload: dict[str, Any], result: dict[str, Any]) -> str:
         actions = result.get("actions") or []
         lines = [
-            "# U校园未识别页面报告",
+            "# FreeOCS U校园页面分析报告（供开发者）",
             "",
             f"- 页面：{payload.get('title', '')}",
             f"- URL：{payload.get('url', '')}",
             f"- 失败原因：{payload.get('reason', '')}",
-            f"- 题目：{payload.get('question', '')}",
+            f"- 当前题目：{payload.get('question', '')}",
             "",
-            "## AI 分析",
+            "## 开发者报告",
             "",
-            str(result.get("explanation", "") or result.get("error", "") or "（无）"),
+            str(result.get("ai_report", "") or result.get("explanation", "") or result.get("error", "") or "（AI 未生成报告）"),
             "",
-            "## AI 答案",
-            "",
-            str(result.get("answer", "") or "（无）"),
-            "",
-            "## 建议操作",
+            "## 可执行操作",
             "",
         ]
         if actions:
@@ -563,6 +603,8 @@ class UcampusModule(Module):
                 )
         else:
             lines.append("（AI 未给出可执行动作）")
+        if result.get("answer"):
+            lines += ["", "## AI 建议答案", "", str(result["answer"])]
         if result.get("error"):
             lines += ["", "## 错误", "", str(result["error"])]
         return "\n".join(lines).strip() + "\n"
@@ -573,7 +615,12 @@ class UcampusModule(Module):
         digest = hashlib.sha1((url + str(payload.get("html", ""))[:2000]).encode("utf-8", "replace")).hexdigest()[:10]
         folder = self.ctx.data_dir / "reports"
         folder.mkdir(parents=True, exist_ok=True)
-        target = folder / f"{stamp}-{digest}.zip"
+        title = str(payload.get("title", "") or "未识别页面")
+        title = re.sub(r"[\\/:*?\"<>|\s]+", "_", title).strip("_")[:32] or "未识别页面"
+        reason = str(payload.get("reason", "") or "")
+        reason = re.sub(r"[\\/:*?\"<>|\s]+", "_", reason).strip("_")[:16]
+        suffix = f"_{reason}" if reason else ""
+        target = folder / f"FreeOCS_AI报告_{stamp}_{title}{suffix}_{digest[:6]}.zip"
         meta = {
             "saved_at": datetime.now().astimezone().isoformat(timespec="seconds"),
             "url": url,

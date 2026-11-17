@@ -275,7 +275,7 @@
         parts.push(`<button class="btn ${style}" data-action="${UI.escapeHtml(action.id)}" ${available ? "" : "disabled"}>${UI.escapeHtml(action.label || action.id)}</button>`);
       }
       parts.push(`<button class="btn btn-ghost" id="module-back">返回应用</button>`);
-      parts.push(`<button class="btn btn-ghost" id="module-report">向开发者报告</button>`);
+      parts.push(`<button class="btn btn-ghost" id="module-report">向开发者发送报告</button>`);
       container.innerHTML = parts.join("");
       const start = container.querySelector("#module-start");
       const stop = container.querySelector("#module-stop");
@@ -294,13 +294,15 @@
       try {
         const info = await API.must("get_reports");
         const count = (info.reports || []).length;
-        const confirmed = await UI.modal({
-          title: "向开发者报告",
-          message: `U校园未识别页面的 AI 报告会打包成 zip。\n当前已有 ${count} 个报告。\n\n目录：${info.folder || "未知"}\nIssue：${info.issue || "https://github.com/AstercoreTeam/freeocs/issues"}\n\n点击“打开目录和 Issue”，把对应的 zip 附到 Issue 中。`,
+        const result = await UI.modal({
+          title: "向开发者发送报告",
+          message: `U校园未识别页面的 AI 报告会打包成 zip。\n当前已有 ${count} 个报告。\n\n目录：${info.folder || "未知"}\nIssue：${info.issue || "https://github.com/AstercoreTeam/freeocs/issues"}\n邮箱：${info.email || "support@astercore.dpdns.org"}\n\n可以打开目录后附到 Issue，也可以点击“发送到邮箱”把 zip 发给开发者。`,
           confirmText: "打开目录和 Issue",
           cancelText: "取消",
+          extraText: "发送到邮箱",
         });
-        if (confirmed) await API.must("open_reports");
+        if (result === "extra") await API.must("open_report_email");
+        else if (result) await API.must("open_reports");
       } catch (error) {
         UI.toast(error.message || "无法读取报告目录", "error");
       }

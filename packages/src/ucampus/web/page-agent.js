@@ -110,7 +110,32 @@
   }
 
   function renderRunLog() {
-    // The FreeOCS UI owns the log view; the page agent is headless.
+    const host = document.getElementById("freeocs-ucampus-panel");
+    if (!host) return;
+    const list = host.querySelector('[data-foc="run-log"]');
+    if (!list) return;
+    const entries = runState.entries.slice(-8);
+    list.replaceChildren();
+    if (!entries.length) {
+      const empty = document.createElement("div");
+      empty.className = "foc-log-empty";
+      empty.textContent = "暂无执行日志";
+      list.appendChild(empty);
+      return;
+    }
+    for (const entry of entries) {
+      const row = document.createElement("div");
+      row.className = `foc-log-row ${entry.type || "info"}`;
+      const time = document.createElement("span");
+      time.className = "foc-log-time";
+      time.textContent = entry.time || "";
+      const message = document.createElement("span");
+      message.className = "foc-log-message";
+      message.textContent = entry.message || "";
+      row.append(time, message);
+      list.appendChild(row);
+    }
+    list.scrollTop = list.scrollHeight;
   }
 
   function modulePath(path) {
@@ -2551,8 +2576,13 @@
     let index = 0;
     for (const doc of pageDocuments()) {
       const nodes = [...doc.querySelectorAll(
-        "button, input, textarea, select, [role='button'], [role='radio'], " +
-        "[role='checkbox'], [contenteditable='true']"
+        "button, a, input, textarea, select, " +
+        "[role='button'], [role='radio'], [role='checkbox'], [role='tab'], " +
+        "[role='option'], [role='switch'], [contenteditable='true'], [onclick], " +
+        ".option, .ant-dropdown-trigger, .scoop-select-wrapper, .input-item, " +
+        "[class*='btn'], [class*='button'], [class*='tab'], [class*='choice'], " +
+        "[class*='select'], [class*='record'], [class*='play'], [class*='audio'], " +
+        "[class*='item']"
       )];
       for (const element of nodes) {
         if (!visible(element) || element.closest("#uca-panel, #freeocs-ucampus-panel")) continue;
@@ -2582,6 +2612,9 @@
           value: String(element.value || "").slice(0, 500),
           placeholder: element.getAttribute("placeholder") || "",
           aria: element.getAttribute("aria-label") || "",
+          role: element.getAttribute("role") || "",
+          id: element.id || "",
+          className: typeof element.className === "string" ? element.className.slice(0, 240) : "",
           checked: Boolean(element.checked),
           disabled: Boolean(element.disabled),
         });
@@ -2611,8 +2644,9 @@
     const interactive = elements.some((item) =>
       ["input", "radio", "checkbox", "select"].includes(item.kind)
     );
-    if (!elements.length) return false;
-    if (!question && !interactive) return false;
+    // Do not require standard interactive elements: many U校园 pages use
+    // custom div/span controls.  The full HTML/text is still useful to AI.
+    if (!elements.length && !question && !interactive) return false;
     const clone = document.documentElement.cloneNode(true);
     clone.querySelectorAll("#freeocs-ucampus-panel, #freeocs-ucampus-panel-style")
       .forEach((element) => element.remove());
@@ -2627,6 +2661,8 @@
       html,
       text,
       elements,
+      force_action: Boolean(options.explicit) && !options.reportOnly,
+      report_only: Boolean(options.reportOnly),
     };
     let pagePath = "";
     try {
@@ -2637,17 +2673,29 @@
       updateRunLog(`保存不支持页面失败：${error.message}`, "warn");
     }
     const estimate = Math.max(1, Math.ceil((html.length + text.length) / 4));
-    const message = [
-      "AI 网页兜底会把当前页面内容发送给模型，可能消耗较多 token。",
-      `预计输入约 ${estimate.toLocaleString()} tokens（仅估算）。`,
-      "是否继续？",
-    ].join("\n\n");
+    const message = options.reportOnly
+      ? [
+          `这可能会消耗约 ${estimate.toLocaleString()} tokens。`,
+          "感谢您对开源项目的支持。",
+          "报告生成后，请在模块页点击“向开发者发送报告”提交。",
+          "是否继续？",
+        ].join("\n\n")
+      : [
+          "AI 网页兜底会把当前页面内容发送给模型，可能消耗较多 token。",
+          `预计输入约 ${estimate.toLocaleString()} tokens（仅估算）。`,
+          "是否继续？",
+        ].join("\n\n");
     const confirmed = typeof window.confirm === "function" ? window.confirm(message) : false;
     if (!confirmed) {
       updateRunLog("已取消 AI 网页兜底，未发送给模型", "warn");
       return false;
     }
-    updateRunLog(`用户确认 AI 网页兜底：${reason || "未识别题型"}`, "info");
+    updateRunLog(
+      options.reportOnly
+        ? "用户确认生成兼容性报告"
+        : `用户确认 AI 网页兜底：${reason || "未识别题型"}`,
+      "info"
+    );
     let response;
     try {
       response = await request("/api/module/ucampus/answer-page", {
@@ -2662,11 +2710,23 @@
       updateRunLog(`页面记录：${response.page_path}`, "info");
     }
     if (response?.report) {
-      setPanelAnswer(response.report, "AI 分析报告");
-      setStatus("AI 已生成页面分析报告；请查看面板和本地报告。");
+      setPanelAnswer(response.report, options.reportOnly ? "兼容性报告" : "AI 开发者报告");
+      setStatus(
+        options.reportOnly
+          ? "兼容性报告已生成；请到模块页点击“向开发者发送报告”。"
+          : "AI 已生成页面分析报告；请查看面板和本地报告。"
+      );
     }
     if (response?.report_zip) {
       updateRunLog(`AI 报告 zip：${response.report_zip}`, "success");
+    }
+    if (options.reportOnly) {
+      if (response?.report || response?.report_zip) {
+        updateRunLog("兼容性报告生成完成，未执行任何页面操作", "success");
+        return true;
+      }
+      updateRunLog("兼容性报告生成失败", "error");
+      return false;
     }
     const actions = Array.isArray(response?.actions) ? response.actions : [];
     if (!actions.length) {
@@ -2790,10 +2850,6 @@
         await reportUnknown(currentQuestion(), `朗读评分失败：${error.message}`);
         return false;
       }
-    }
-    if (previewControls.type === "unsupported" && isVoicePracticePage()) {
-      await waitingForManual("检测到朗读/配音/录音任务，请手动完成；完成提交后会自动继续");
-      return false;
     }
     const detectedVideo = videoForAutomation();
     const previewQuestion = currentQuestion();
@@ -3003,8 +3059,8 @@
         const noQuestion = !question || !looksLikeQuestion(question);
         const label = noQuestion ? "无题目页面" : "未识别题型";
         showAiButton(true, question || "", controls.reason || label);
-        setStatus(`${label}；可点面板“AI直接作答”让模型分析页面（会消耗较多 token）`);
-        updateRunLog(`${label}，已显示“AI直接作答”按钮`, "warn");
+        setStatus(`${label}；可点面板“生成兼容性报告”向开发者反馈（会消耗较多 token）`);
+        updateRunLog(`${label}，已显示“生成兼容性报告”按钮`, "warn");
         return { type: "unsupported" };
       }
       if (question && !looksLikeQuestion(question)) {
@@ -3371,7 +3427,7 @@
       clearSubmitHandoff();
       manualStop = false;
       runHalted = false;
-      showAiButton(false);
+      showAiButton(true);
       runState = { completed: 0, entries: [] };
       gmSet(RUN_STATE_KEY, runState);
       if (isCourseDetailPage()) await startFromCourseDetail();
@@ -3432,10 +3488,13 @@
     if (!host) return;
     const button = host.querySelector('[data-foc="ai"]');
     if (!button) return;
-    if (show) lastUnsupported = { question, reason };
-    button.hidden = !show;
-    button.disabled = !show || aiReportRunning;
-    button.textContent = aiReportRunning ? "AI 分析中…" : "AI直接作答";
+    if (show && (question || reason)) {
+      lastUnsupported = { question, reason, url: location.href };
+    }
+    // Manual AI answer is available on every page, not just unsupported ones.
+    button.hidden = false;
+    button.disabled = aiReportRunning;
+    button.textContent = aiReportRunning ? "正在生成报告…" : "生成兼容性报告";
   }
 
   function setPanelAnswer(text, label = "排序答案") {
@@ -3462,19 +3521,28 @@
 
   async function runAiDirect(button) {
     if (aiReportRunning) return;
-    const info = lastUnsupported || {
-      question: currentQuestion(),
-      reason: "未识别题型",
-    };
+    const info = (lastUnsupported && lastUnsupported.url === location.href)
+      ? lastUnsupported
+      : {
+          question: currentQuestion(),
+          reason: "生成兼容性报告",
+          url: location.href,
+        };
     aiReportRunning = true;
     showAiButton(true, info.question, info.reason);
+    setPanelAnswer("AI 正在分析页面并生成兼容性报告…", "兼容性报告");
+    setStatus("AI 正在生成兼容性报告…");
+    let handled = false;
     try {
-      const handled = await runWebFallback(info.question, info.reason, { explicit: true });
+      handled = await runWebFallback(info.question, info.reason, {
+        explicit: true,
+        reportOnly: true,
+      });
       if (!handled) {
-        updateRunLog("AI 直接作答未执行，可检查报告或刷新后重试", "warn");
+        updateRunLog("兼容性报告未生成，可检查日志后重试", "warn");
       }
     } catch (error) {
-      updateRunLog(`AI 直接作答失败：${error.message}`, "error");
+      updateRunLog(`兼容性报告生成失败：${error.message}`, "error");
     } finally {
       aiReportRunning = false;
       showAiButton(true, info.question, info.reason);
@@ -3500,6 +3568,10 @@
         <div class="foc-body">
           <div class="foc-status" data-foc="status">正在连接 FreeOCS…</div>
           <div class="foc-hint" data-foc="hint"></div>
+          <div class="foc-run-log-wrap">
+            <div class="foc-run-log-title">执行日志</div>
+            <div class="foc-run-log" data-foc="run-log"></div>
+          </div>
           <div class="foc-answer-wrap" data-foc="answer-wrap" hidden>
             <div class="foc-answer-label" data-foc="answer-label">排序答案</div>
             <div class="foc-answer" data-foc="answer"></div>
@@ -3507,7 +3579,7 @@
           <div class="foc-actions">
             <button type="button" class="foc-start" data-foc="start">开始</button>
             <button type="button" class="foc-stop" data-foc="stop">停止</button>
-            <button type="button" class="foc-ai" data-foc="ai" hidden>AI直接作答</button>
+            <button type="button" class="foc-ai" data-foc="ai">生成兼容性报告</button>
           </div>
           <div class="foc-note">只填答案，不会自动提交/交卷/发布。控制范围仅限本标签页。</div>
         </div>`;
@@ -3529,6 +3601,16 @@
         #freeocs-ucampus-panel.collapsed .foc-body{display:none;}
         #freeocs-ucampus-panel .foc-status{font-size:12px;color:#172033;min-height:18px;word-break:break-word;}
         #freeocs-ucampus-panel .foc-hint{margin-top:3px;color:#68748a;font-size:11px;min-height:15px;word-break:break-word;}
+        #freeocs-ucampus-panel .foc-run-log-wrap{margin-top:8px;padding-top:7px;border-top:1px solid #e3e8f0;}
+        #freeocs-ucampus-panel .foc-run-log-title{font-size:10px;color:#8a94a6;margin-bottom:4px;}
+        #freeocs-ucampus-panel .foc-run-log{max-height:108px;overflow:auto;display:grid;gap:3px;font-size:10px;line-height:1.45;}
+        #freeocs-ucampus-panel .foc-log-row{display:grid;grid-template-columns:52px minmax(0,1fr);gap:6px;color:#46536a;}
+        #freeocs-ucampus-panel .foc-log-time{color:#98a2b3;font-variant-numeric:tabular-nums;}
+        #freeocs-ucampus-panel .foc-log-message{overflow-wrap:anywhere;}
+        #freeocs-ucampus-panel .foc-log-row.error .foc-log-message{color:#dc2626;}
+        #freeocs-ucampus-panel .foc-log-row.warn .foc-log-message{color:#b45309;}
+        #freeocs-ucampus-panel .foc-log-row.success .foc-log-message{color:#15803d;}
+        #freeocs-ucampus-panel .foc-log-empty{color:#98a2b3;font-size:10px;}
         #freeocs-ucampus-panel .foc-answer-wrap{margin-top:8px;padding:7px 8px;border-left:3px solid #2f6fed;border-radius:5px;background:#f4f7ff;}
         #freeocs-ucampus-panel .foc-answer-label{font-size:10px;color:#68748a;margin-bottom:3px;}
         #freeocs-ucampus-panel .foc-answer{font-size:12px;line-height:1.5;color:#172033;white-space:pre-wrap;word-break:break-word;max-height:150px;overflow:auto;user-select:text;}
@@ -3549,6 +3631,7 @@
         }`;
       document.documentElement.appendChild(style);
       document.documentElement.appendChild(host);
+      renderRunLog();
       const start = host.querySelector('[data-foc="start"]');
       const stop = host.querySelector('[data-foc="stop"]');
       const ai = host.querySelector('[data-foc="ai"]');
