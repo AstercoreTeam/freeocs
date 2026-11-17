@@ -1143,7 +1143,7 @@
 
   function practiceTabs(doc) {
     return [...doc.querySelectorAll(
-        "[role='tab'], button, [role='button'], [class*='tab'], [class*='Tab'], [class*='radio-button-wrapper'], [class*='sub-tab'], [class*='subTab']"
+        "[role='tab'], button, [role='button'], [class*='tab'], [class*='Tab'], [class*='radio-button-wrapper'], [class*='sub-tab'], [class*='subTab'], .pc-task"
       )].filter((element) =>
         visible(element) && !element.closest("#uca-panel, #freeocs-ucampus-panel") &&
         !element.matches("[class*='taskItemContainer']") &&
@@ -1227,7 +1227,7 @@
         if (rect.left > width * 0.75 || rect.left < 0) continue;
         const className = typeof element.className === "string" ? element.className : "";
         if (element.getAttribute("role") !== "tab" &&
-          !/(?:tab|radio-button-wrapper|sub-tab|subTab)/i.test(className)) continue;
+          !/(?:tab|radio-button-wrapper|sub-tab|subTab|pc-task)/i.test(className)) continue;
         if (element.querySelector(
           "[role='tab'], [class*='tabItemContainer'], [class*='tabItem'], " +
           "[class*='pc-tab-view-container'], [class*='pc-header-tab'], " +
@@ -1284,6 +1284,37 @@
         return {
           element: found[index + 1].element,
           label: found[index + 1].label,
+          sectionTab: true,
+        };
+      }
+    }
+    return null;
+  }
+
+  function nextPracticeTask() {
+    // U校园 Practice 1..4 are .pc-task nodes inside the Practice header, not
+    // standard tabs.  Advancing the catalog micro before Practice 4 would
+    // silently skip the remaining practice pages.
+    if (practiceTab()) return null;
+    for (const doc of pageDocuments()) {
+      const tasks = [...doc.querySelectorAll(".pc-task")]
+        .filter((element) =>
+          visible(element) &&
+          !element.closest("#uca-panel, #freeocs-ucampus-panel")
+        )
+        .map((element) => ({
+          element,
+          label: (element.innerText || element.getAttribute("title") || "")
+            .trim().replace(/\s+/g, " "),
+          active: tabElementActive(element),
+        }))
+        .filter((task) => /^Practice\s*\d+$/i.test(task.label));
+      if (tasks.length < 2) continue;
+      const index = tasks.findIndex((task) => task.active);
+      if (index >= 0 && index + 1 < tasks.length) {
+        return {
+          element: tasks[index + 1].element,
+          label: tasks[index + 1].label,
           sectionTab: true,
         };
       }
@@ -1421,6 +1452,8 @@
     if (speaking) return speaking;
     const reading = nextReadingTab();
     if (reading) return reading;
+    const practiceTask = nextPracticeTask();
+    if (practiceTask) return practiceTask;
     const nested = nextNestedTab();
     if (nested) return nested;
     const menu = nextMenuTarget();
