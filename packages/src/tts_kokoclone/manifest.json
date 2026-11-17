@@ -96,7 +96,7 @@
           "mode": "dir",
           "label": "KokoClone 目录",
           "default": "",
-          "help": "包含 core/cloner.py、model/ 和 voice/ 的 KokoClone 项目目录。"
+          "help": "默认留空，使用程序目录 models/；仅兼容外部 KokoClone 时才填写。"
         },
         {
           "key": "python_path",
@@ -112,7 +112,7 @@
           "mode": "file",
           "label": "参考音频（用于克隆）",
           "default": "",
-          "help": "放一段 3-10 秒、单人、无背景音乐的人声；也可在首页上传或现场录制。合成时用这段声音克隆。"
+          "help": "留空时自动使用内置的 MOSS-TTS-Nano 示例音频（中文 zh_1.wav / 英文 en_2.wav）；也可以选择自己的 3-10 秒人声。"
         },
         {
           "key": "language",

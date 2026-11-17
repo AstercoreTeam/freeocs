@@ -221,3 +221,5 @@
   .home-log-message { grid-column: 1 / -1; }
   .home-model-grid { grid-template-columns: 1fr; }
 }
+
+.home-page-actions { display: flex; flex-wrap: wrap; gap: 8px; }

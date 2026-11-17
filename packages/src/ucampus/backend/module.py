@@ -14,6 +14,7 @@ import json
 import threading
 import time
 import uuid
+import zipfile
 from collections import deque
 from datetime import datetime
 from pathlib import Path
@@ -508,7 +509,7 @@ class UcampusModule(Module):
             actions = self._validate_page_actions(plan.get("actions"), elements)
             answer = str(plan.get("answer", "") or "")[:5000]
             explanation = str(plan.get("explanation", "") or "")[:2000]
-            return {
+            response = {
                 "actions": actions,
                 "answer": answer,
                 "explanation": explanation,
@@ -516,15 +517,84 @@ class UcampusModule(Module):
                 "raw": raw[:4000],
                 "model": str((result.message or {}).get("model", "") or ""),
             }
+            response["report"] = self._ai_report_text(payload, response)
+            response["report_zip"] = self._write_report_zip(payload, response)
+            return response
         except Exception as exc:  # noqa: BLE001
             self.ctx.log("warn", f"网页 AI 兜底失败：{exc}")
-            return {
+            response = {
                 "actions": [],
                 "answer": "",
                 "explanation": "",
                 "page_path": page_path,
                 "error": str(exc),
             }
+            response["report"] = self._ai_report_text(payload, response)
+            response["report_zip"] = self._write_report_zip(payload, response)
+            return response
+
+    @staticmethod
+    def _ai_report_text(payload: dict[str, Any], result: dict[str, Any]) -> str:
+        actions = result.get("actions") or []
+        lines = [
+            "# U校园未识别页面报告",
+            "",
+            f"- 页面：{payload.get('title', '')}",
+            f"- URL：{payload.get('url', '')}",
+            f"- 失败原因：{payload.get('reason', '')}",
+            f"- 题目：{payload.get('question', '')}",
+            "",
+            "## AI 分析",
+            "",
+            str(result.get("explanation", "") or result.get("error", "") or "（无）"),
+            "",
+            "## AI 答案",
+            "",
+            str(result.get("answer", "") or "（无）"),
+            "",
+            "## 建议操作",
+            "",
+        ]
+        if actions:
+            for action in actions:
+                lines.append(
+                    f"- {action.get('type')} #{action.get('index')}："
+                    f"{action.get('value', '') or action.get('reason', '')}"
+                )
+        else:
+            lines.append("（AI 未给出可执行动作）")
+        if result.get("error"):
+            lines += ["", "## 错误", "", str(result["error"])]
+        return "\n".join(lines).strip() + "\n"
+
+    def _write_report_zip(self, payload: dict[str, Any], result: dict[str, Any]) -> str:
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        url = str(payload.get("url", "") or "")
+        digest = hashlib.sha1((url + str(payload.get("html", ""))[:2000]).encode("utf-8", "replace")).hexdigest()[:10]
+        folder = self.ctx.data_dir / "reports"
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / f"{stamp}-{digest}.zip"
+        meta = {
+            "saved_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "url": url,
+            "title": str(payload.get("title", "") or ""),
+            "reason": str(payload.get("reason", "") or ""),
+            "question": str(payload.get("question", "") or ""),
+            "question_type": str(payload.get("question_type", "") or "unsupported"),
+            "text": str(payload.get("text", "") or ""),
+            "elements": payload.get("elements") if isinstance(payload.get("elements"), list) else [],
+        }
+        try:
+            with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("page.html", str(payload.get("html", "") or "")[:2_000_000])
+                archive.writestr("meta.json", json.dumps(meta, ensure_ascii=False, indent=2))
+                archive.writestr("ai.json", json.dumps(result, ensure_ascii=False, indent=2))
+                archive.writestr("report.md", self._ai_report_text(payload, result))
+            self.ctx.log("info", f"已生成 AI 报告 zip：{target}")
+            return str(target)
+        except OSError as exc:
+            self.ctx.log("warn", f"生成 AI 报告 zip 失败：{exc}")
+            return ""
 
     @staticmethod
     def _validate_page_actions(

@@ -11,6 +11,7 @@ import logging
 import os
 import shutil
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -123,9 +124,7 @@ class Application:
         """Local-first defaults when the user has not bound a capability yet."""
         preferred = {
             "media.asr": "asr_whisper",
-            # KokoClone needs user-provided models/reference audio; keep the
-            # system TTS default so dubbing/reading pages work out of the box.
-            "media.tts": "tts_system",
+            "media.tts": "tts_kokoclone",
             "media.ocr": "ocr_rapid",
         }
         current = self.settings.capability_bindings()
@@ -150,9 +149,12 @@ class Application:
         web_dir = self.paths.web_dir
         if not (web_dir / "index.html").is_file():
             raise RuntimeError(f"前端资源不存在：{web_dir / 'index.html'}")
+        # A fresh query string prevents WebKit from reusing an old cached
+        # module.js/app.js after a source update or restart.
+        index_url = f"{web_dir / 'index.html'}?v={int(time.time())}"
         self._window = webview.create_window(
             "FreeOCS - 学习助手",
-            str(web_dir / "index.html"),
+            index_url,
             js_api=api,
             width=1240,
             height=780,

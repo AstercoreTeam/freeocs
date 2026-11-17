@@ -567,6 +567,126 @@
       .filter((item) => item.trigger && item.options.length >= 2);
   }
 
+  function wordFromMediaUrl(src) {
+    if (!src) return "";
+    try {
+      const hash = new URL(src, location.href).hash.replace(/^#/, "");
+      const name = new URLSearchParams(hash).get("name") || "";
+      const decoded = decodeURIComponent(name);
+      const word = decoded
+        .replace(/^\s*\d+\s*[.)、:：-]?\s*/, "")
+        .replace(/\.(?:mp3|wav|m4a|aac|ogg|flac)$/i, "")
+        .trim();
+      return /^[A-Za-z][A-Za-z'-]*$/.test(word) ? word : "";
+    } catch (_) {
+      return "";
+    }
+  }
+
+  function dictationItems(doc) {
+    return [...doc.querySelectorAll(".word-dictation-input")]
+      .filter((element) =>
+        visible(element) && !element.closest("#uca-panel, #freeocs-ucampus-panel")
+      )
+      .map((element, index) => {
+        const wrap = element.closest(".reply-area-wrap") ||
+          element.closest(".comp-word-dictation-reply") || element.parentElement;
+        const audio = wrap?.querySelector("audio");
+        const src = audio?.currentSrc || audio?.src || audio?.getAttribute("src") || "";
+        return {
+          element,
+          slots: [...element.querySelectorAll(".input-item")].filter(visible),
+          src,
+          word: wordFromMediaUrl(src),
+          index,
+        };
+      })
+      .filter((item) => item.slots.length);
+  }
+
+  async function answerDictation(controls) {
+    const items = controls.items || [];
+    if (!items.length) return false;
+    updateRunLog(`检测到 ${items.length} 个听写单词，开始转写音频`, "info");
+    setStatus("正在转写听写音频…");
+    const answers = [];
+    for (const [index, item] of items.entries()) {
+      let transcriptWord = "";
+      if (item.src) {
+        try {
+          const transcript = (await transcribeAudioUrl(item.src) || "").trim();
+          const match = transcript.match(/[A-Za-z][A-Za-z'-]*/);
+          if (match) transcriptWord = match[0];
+          if (transcriptWord) updateRunLog(`听写 ${index + 1} 音频转写：${transcriptWord}`, "info");
+        } catch (error) {
+          updateRunLog(`听写 ${index + 1} 音频转写失败：${error.message}`, "warn");
+        }
+      }
+      const candidates = [];
+      // The audio URL name is usually the exact word; ASR can hear "hat" as
+      // "that".  Prefer the candidate whose letter count matches the slots.
+      if (item.word) candidates.push(item.word);
+      if (transcriptWord) candidates.push(transcriptWord);
+      let word = candidates.find((candidate) =>
+        candidate.replace(/[^A-Za-z]/g, "").length === item.slots.length
+      ) || candidates[0] || "";
+      if (!word) {
+        await waitingForManual(`听写 ${index + 1} 无法转写，请手动完成`);
+        return false;
+      }
+      const letters = word.replace(/[^A-Za-z]/g, "");
+      if (!letters) continue;
+      if (item.slots.length < letters.length) {
+        await waitingForManual(`听写 ${index + 1} 字母格不足（${item.slots.length}/${letters.length}），请手动完成`);
+        return false;
+      }
+      item.slots[0].click();
+      for (const [offset, letter] of [...letters].entries()) {
+        const slot = item.slots[offset];
+        slot.click();
+        const code = `Key${letter.toUpperCase()}`;
+        const init = {
+          key: letter,
+          code,
+          keyCode: letter.toUpperCase().charCodeAt(0),
+          which: letter.toUpperCase().charCodeAt(0),
+          bubbles: true,
+          cancelable: true,
+        };
+        for (const target of [document.activeElement, slot, item.element, document, window]) {
+          if (target && typeof target.dispatchEvent === "function") {
+            target.dispatchEvent(new KeyboardEvent("keydown", init));
+            target.dispatchEvent(new KeyboardEvent("keypress", init));
+            target.dispatchEvent(new KeyboardEvent("keyup", init));
+          }
+        }
+        await wait(80);
+      }
+      // Some dictation widgets do not expose a keyboard target. Fill the
+      // visible letter spans as a fallback and notify React via input events.
+      const entered = [...item.element.querySelectorAll(".letter")]
+        .map((element) => (element.textContent || "").trim())
+        .join("");
+      if (entered.length < letters.length) {
+        item.element.querySelectorAll(".letter").forEach((element, offset) => {
+          if (offset < letters.length) element.textContent = letters[offset];
+        });
+        item.element.dispatchEvent(new InputEvent("input", {
+          bubbles: true,
+          inputType: "insertText",
+          data: letters,
+        }));
+      }
+      answers.push(word);
+      updateRunLog(`听写 ${index + 1} 已填入：${word}`, "info");
+    }
+    if (!answers.length) return false;
+    setPanelAnswer(answers.join("\n"), "听写答案");
+    updateRunLog(`听写已完成：${answers.join(" / ")}`, "success");
+    await waitingForManual("听写答案已填入，等待手动提交");
+    return false;
+  }
+
   const answeredRadioKeys = new Set();
 
   function radioGroupKey(group) {
@@ -704,6 +824,10 @@
   function answerControls() {
     const docs = pageDocuments();
     for (const doc of docs) {
+      const dictations = dictationItems(doc);
+      if (dictations.length) {
+        return { type: "dictation", items: dictations, doc };
+      }
       const fileInputs = [...doc.querySelectorAll("input[type='file']")]
         .filter((element) => !element.closest("#uca-panel, #freeocs-ucampus-panel"));
       if (fileInputs.length) {
@@ -812,7 +936,7 @@
         );
       if (recordButtons.length) {
         const items = recordButtons.map((button, index) => {
-          let item = button.closest(".item");
+          let item = button.closest(".oral-study-sentence, .sentence-container, .item");
           if (!item) {
             let parent = button.parentElement;
             for (let depth = 0; depth < 4 && parent; depth += 1) {
@@ -825,7 +949,8 @@
             }
           }
           const explicit = item?.querySelector(
-            ".component-htmlview p, [class*='sentence'], [class*='content'] p"
+            ".sentence-html-container .component-htmlview p, .component-htmlview p, " +
+            "[class*='sentence'] p, [class*='content'] p"
           )?.innerText;
           let text = (explicit || item?.innerText || "").trim();
           text = text.split(/\n+/)
@@ -925,8 +1050,22 @@
     return { video: videos[0] || null };
   }
 
+  async function waitForVisibleVideo(timeoutMs = 10000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const result = videoForAutomation();
+      if (result.video) return result.video;
+      if (!hasVideoPlayerContainer()) return null;
+      await wait(500);
+    }
+    return null;
+  }
+
   function setStatus(text, error = false) {
     currentStatus = error ? `失败：${text}` : text;
+    const host = document.getElementById("freeocs-ucampus-panel");
+    const statusEl = host?.querySelector('[data-foc="status"]');
+    if (statusEl) statusEl.textContent = currentStatus;
   }
 
   async function reportUnknown(question, reason) {
@@ -943,8 +1082,10 @@
       setStatus(`未识别：${reason}；写入日志失败：${error.message}`, true);
       return false;
     }
+    const label = question ? "未识别题目" : "无题目页面";
     updateRunLog(`无法继续：${reason}`, "error");
-    setStatus(`未识别题目，已记录：${reason}\n${payload.question.slice(0, 240)}`, true);
+    showAiButton(true, payload.question, reason);
+    setStatus(`${label}，已记录：${reason}\n${payload.question.slice(0, 240)}`, true);
     console.warn("[UCampus Assistant] 未识别题目", payload);
     runHalted = true;
     return true;
@@ -1022,6 +1163,12 @@
       setStatus("请按面板答案手动拖拽，然后提交");
       await waitingForManual("排序/匹配答案已显示在面板；请手动拖拽后提交");
       return;
+    }
+    if (controls.type === "dictation") {
+      return (controls.items || []).every((item) =>
+        [...item.element.querySelectorAll(".letter")]
+          .every((element) => (element.textContent || "").trim())
+      );
     }
     if (controls.type === "dropdown") {
       const pending = controls.dropdown;
@@ -1169,12 +1316,24 @@
       video.duration > 0 && video.currentTime >= video.duration - 0.5)) {
       return true;
     }
+    updateRunLog("检测到无题视频，等待视频播放完成", "info");
     setStatus("正在播放课程视频；播放完成后继续下一步…");
+    const wasMuted = video.muted;
     try {
       const playback = video.play();
       if (playback && typeof playback.then === "function") await playback;
     } catch (error) {
-      throw new Error(`视频无法自动播放（可能被浏览器拦截）：${error.message}`);
+      // Autoplay with audio is commonly blocked.  Retry muted; restore the
+      // user's mute state after playback has started.
+      try {
+        video.muted = true;
+        const playback = video.play();
+        if (playback && typeof playback.then === "function") await playback;
+        window.setTimeout(() => { video.muted = wasMuted; }, 1000);
+        updateRunLog("视频已静音播放；播放完成后继续", "info");
+      } catch (mutedError) {
+        throw new Error(`视频无法自动播放（可能被浏览器拦截）：${mutedError.message}`);
+      }
     }
 
     return new Promise((resolve, reject) => {
@@ -1329,6 +1488,8 @@
         const key = text;
         if (seen.has(key)) continue;
         seen.add(key);
+        // The click handler is on the inner .pc-tab-view-container; clicking
+        // only its outer .pc-header-tab wrapper does not switch the tab.
         tabs.push({
           element,
           label: text,
@@ -2220,11 +2381,16 @@
     source.connect(destination);
     source.connect(context.destination);
     pageWindow.__ucaDubbingStream = destination.stream;
-    source.start();
-    await wait(300);
-    updateRunLog(`开始朗读第 ${item.index + 1} 句：${item.text.slice(0, 60)}`, "info");
+    // Start the page recorder first.  Starting the audio source before the
+    // recorder has consumed the synthetic mic stream drops the first part of
+    // the word and makes scoring fail.
     item.button.click();
-    await wait(buffer.duration * 1000 + 900);
+    // U校园 的录音控件通常需要约 1 秒才真正进入录制状态；固定等 2 秒，
+    // 避免合成音频在录音开始前被播放掉。
+    await wait(2000);
+    updateRunLog(`开始录制第 ${item.index + 1} 句：${item.text.slice(0, 60)}`, "info");
+    source.start();
+    await wait(buffer.duration * 1000 + 500);
     item.button.click();
     await wait(2500);
     try { source.stop(); } catch (_) {}
@@ -2440,7 +2606,7 @@
     return /提交|交卷|发布|评分提交|确定提交|保存并提交/.test(String(text || ""));
   }
 
-  async function runWebFallback(question, reason) {
+  async function runWebFallback(question, reason, options = {}) {
     const elements = collectFallbackElements();
     const interactive = elements.some((item) =>
       ["input", "radio", "checkbox", "select"].includes(item.kind)
@@ -2495,13 +2661,20 @@
     if (response?.page_path) {
       updateRunLog(`页面记录：${response.page_path}`, "info");
     }
+    if (response?.report) {
+      setPanelAnswer(response.report, "AI 分析报告");
+      setStatus("AI 已生成页面分析报告；请查看面板和本地报告。");
+    }
+    if (response?.report_zip) {
+      updateRunLog(`AI 报告 zip：${response.report_zip}`, "success");
+    }
     const actions = Array.isArray(response?.actions) ? response.actions : [];
     if (!actions.length) {
       updateRunLog(
         `AI 网页兜底没有可执行操作${response?.error ? `：${response.error}` : ""}`,
         "warn"
       );
-      return false;
+      return Boolean(response?.report || response?.report_zip);
     }
     let executed = 0;
     for (const action of actions) {
@@ -2566,7 +2739,8 @@
       initialControls.type !== "unsupported" ||
       initialControls.type === "matching" ||
       initialVideoWithQuestions;
-    if (hasSubmitAction() && !initialAnswerable && !hasQuestionInteractives()) {
+    if (hasSubmitAction() && !initialAnswerable && !hasQuestionInteractives() &&
+      !isVoicePracticePage() && !hasVideoPlayerContainer()) {
       await waitingForManual("当前页面已到提交步骤，等待手动提交");
       return false;
     }
@@ -2698,6 +2872,10 @@
     let audioTranscript = videoTranscript;
     const audioList = audioSources();
     const controls = answerControls();
+    if (controls.type === "dictation") {
+      await answerDictation(controls);
+      return { type: "question" };
+    }
     if (controls.type === "essays") {
       for (const [index, field] of controls.fields.entries()) {
         const container = field.closest(".item, [class*='question']") ||
@@ -2780,15 +2958,54 @@
         return { type: "content" };
       }
       if (controls.type === "unsupported") {
-        if (isContentOnlyPage()) {
-          updateRunLog("当前为无题学习页，自动进入下一子模块", "info");
+        if (isQuizSummaryPage()) {
+          setStatus("检测到答题小结，等待 1 秒后继续…");
+          updateRunLog("检测到答题小结，等待 1 秒后继续", "info");
+          await wait(1000);
+          const next = nextQuestionButton() || pageActionButton();
+          if (next) {
+            next.click();
+            updateRunLog("已点击继续学习", "success");
+          }
           return { type: "content" };
         }
-        const handled = await runWebFallback(
-          question || "",
-          controls.reason || "未识别题型"
-        );
-        if (handled) return { type: "question" };
+        if (hasVideoPlayerContainer()) {
+          const lateVideo = await waitForVisibleVideo(10000);
+          if (lateVideo) {
+            try {
+              const finished = await playVideoToEnd(lateVideo);
+              if (finished) {
+                updateRunLog("视频播放完成，继续下一子模块", "info");
+                return { type: "content" };
+              }
+            } catch (error) {
+              updateRunLog(`视频无法播放：${error.message}`, "warn");
+            }
+          }
+        }
+        if (isContentOnlyPage()) {
+          const contentVideo = videoForAutomation().video;
+          if (contentVideo) {
+            try {
+              const finished = await playVideoToEnd(contentVideo);
+              if (finished) updateRunLog("无题视频播放完成，继续下一子模块", "info");
+            } catch (error) {
+              updateRunLog(`无题视频无法播放：${error.message}`, "warn");
+              await handleUnsupportedVideo(error.message);
+            }
+          } else {
+            setStatus("无题目页面，等待 10 秒后继续…");
+            updateRunLog("无题目且无视频，等待 10 秒后继续", "info");
+            await wait(10000);
+          }
+          return { type: "content" };
+        }
+        const noQuestion = !question || !looksLikeQuestion(question);
+        const label = noQuestion ? "无题目页面" : "未识别题型";
+        showAiButton(true, question || "", controls.reason || label);
+        setStatus(`${label}；可点面板“AI直接作答”让模型分析页面（会消耗较多 token）`);
+        updateRunLog(`${label}，已显示“AI直接作答”按钮`, "warn");
+        return { type: "unsupported" };
       }
       if (question && !looksLikeQuestion(question)) {
         updateRunLog("当前为无题目学习页，跳过答题并继续", "info");
@@ -3050,16 +3267,25 @@
         next.element.click();
         let changed = false;
         if (next.sectionTab) {
-          for (let retry = 0; retry < 20 && automationRunning; retry += 1) {
+          const tabHost = next.element.closest(
+            "[class*='pc-header-tab']"
+          ) || next.element;
+          for (let retry = 0; retry < 24 && automationRunning; retry += 1) {
             await wait(500);
             const active = contentTabs().find((tab) => tab.active);
             if (active && active.label === next.label) {
               changed = true;
               break;
             }
+            // The video page is still mounting during the first click.
+            // Retry both the inner view container and its outer header.
+            if (retry % 2 === 0) {
+              next.element.click();
+              if (tabHost !== next.element) tabHost.click();
+            }
           }
           if (!changed && automationRunning) {
-            await wait(2500);
+            await wait(1000);
             changed = true;
           }
         } else {
@@ -3145,6 +3371,7 @@
       clearSubmitHandoff();
       manualStop = false;
       runHalted = false;
+      showAiButton(false);
       runState = { completed: 0, entries: [] };
       gmSet(RUN_STATE_KEY, runState);
       if (isCourseDetailPage()) await startFromCourseDetail();
@@ -3197,6 +3424,20 @@
     body.textContent = panelAnswer || "";
   }
 
+  let lastUnsupported = null;
+  let aiReportRunning = false;
+
+  function showAiButton(show, question = "", reason = "") {
+    const host = document.getElementById("freeocs-ucampus-panel");
+    if (!host) return;
+    const button = host.querySelector('[data-foc="ai"]');
+    if (!button) return;
+    if (show) lastUnsupported = { question, reason };
+    button.hidden = !show;
+    button.disabled = !show || aiReportRunning;
+    button.textContent = aiReportRunning ? "AI 分析中…" : "AI直接作答";
+  }
+
   function setPanelAnswer(text, label = "排序答案") {
     panelAnswer = String(text || "").trim();
     panelAnswerLabel = label;
@@ -3217,6 +3458,27 @@
     panelAnswerLabel = "";
     panelAnswerUrl = "";
     renderPanelAnswer();
+  }
+
+  async function runAiDirect(button) {
+    if (aiReportRunning) return;
+    const info = lastUnsupported || {
+      question: currentQuestion(),
+      reason: "未识别题型",
+    };
+    aiReportRunning = true;
+    showAiButton(true, info.question, info.reason);
+    try {
+      const handled = await runWebFallback(info.question, info.reason, { explicit: true });
+      if (!handled) {
+        updateRunLog("AI 直接作答未执行，可检查报告或刷新后重试", "warn");
+      }
+    } catch (error) {
+      updateRunLog(`AI 直接作答失败：${error.message}`, "error");
+    } finally {
+      aiReportRunning = false;
+      showAiButton(true, info.question, info.reason);
+    }
   }
 
   function createControlPanel() {
@@ -3245,6 +3507,7 @@
           <div class="foc-actions">
             <button type="button" class="foc-start" data-foc="start">开始</button>
             <button type="button" class="foc-stop" data-foc="stop">停止</button>
+            <button type="button" class="foc-ai" data-foc="ai" hidden>AI直接作答</button>
           </div>
           <div class="foc-note">只填答案，不会自动提交/交卷/发布。控制范围仅限本标签页。</div>
         </div>`;
@@ -3273,6 +3536,8 @@
         #freeocs-ucampus-panel button{font:inherit;border-radius:6px;cursor:pointer;padding:5px 9px;}
         #freeocs-ucampus-panel .foc-start{border:1px solid #2f6fed;background:#2f6fed;color:#fff;}
         #freeocs-ucampus-panel .foc-stop{border:1px solid #cfd8e6;background:#fff;color:#172033;}
+        #freeocs-ucampus-panel .foc-ai{border:1px solid #7c3aed;background:#7c3aed;color:#fff;}
+        #freeocs-ucampus-panel .foc-ai[hidden]{display:none !important;}
         #freeocs-ucampus-panel button:disabled{opacity:.45;cursor:not-allowed;}
         #freeocs-ucampus-panel .foc-note{margin-top:7px;color:#8a94a6;font-size:10px;line-height:1.4;}
         @media (prefers-color-scheme: dark){
@@ -3286,9 +3551,11 @@
       document.documentElement.appendChild(host);
       const start = host.querySelector('[data-foc="start"]');
       const stop = host.querySelector('[data-foc="stop"]');
+      const ai = host.querySelector('[data-foc="ai"]');
       const collapse = host.querySelector('[data-foc="collapse"]');
       start.addEventListener("click", () => void panelCommand("start", start));
       stop.addEventListener("click", () => void panelCommand("stop", stop));
+      ai.addEventListener("click", () => void runAiDirect(ai));
       collapse.addEventListener("click", () => {
         controlPanelCollapsed = !controlPanelCollapsed;
         host.classList.toggle("collapsed", controlPanelCollapsed);
@@ -3347,7 +3614,11 @@
     renderPanelAnswer();
     dot.className = `foc-dot ${active ? (lease ? "on" : "wait") : ""}`;
     if (statusEl) {
-      statusEl.textContent = response?.status || (active ? "运行中" : "未开始");
+      // Local page state is fresher than the module poll snapshot (the video
+      // wait can run for many minutes without a new backend status).
+      statusEl.textContent = (automationRunning && currentStatus)
+        ? currentStatus
+        : (response?.status || (active ? "运行中" : "未开始"));
     }
     if (hintEl) {
       if (active && !lease) hintEl.textContent = "其他标签页正在受控；点“接管本页”切换。";
@@ -3394,13 +3665,40 @@
     return false;
   }
 
+  function isQuizSummaryPage() {
+    for (const doc of pageDocuments()) {
+      const text = (doc.body?.innerText || "").slice(0, 8000);
+      if (!/(?:答题小结|答题情况|本次答题|正确\s*[（(]\s*\d+\s*\/\s*\d+|错误\s*[（(]\s*\d+)/.test(text)) {
+        continue;
+      }
+      const hasContinue = [...doc.querySelectorAll("button, a, [role='button']")]
+        .some((element) => visible(element) &&
+          /继续学习|继续答题|下一题|下一步/.test((element.innerText || "").trim()));
+      if (hasContinue) return true;
+    }
+    return false;
+  }
+
   function isContentOnlyPage() {
     if (isCourseDetailPage()) return false;
     const controls = answerControls();
     if (controls.type !== "unsupported") return false;
     if (hasSubmitAction() || isDiscussionPage()) return false;
-    if (videoForAutomation().video || audioSources().length) return false;
+    const video = videoForAutomation().video;
     const question = currentQuestion();
+    if (video) {
+      // Mini-lecture video pages have no question; switch to the next tab
+      // (usually Practice) instead of stopping as unsupported.
+      if (question && looksLikeQuestion(question)) return false;
+      return Boolean(
+        nextSectionTab() ||
+        practiceTab() ||
+        contentTabs().length > 1 ||
+        pageActionButton() ||
+        hasVideoPlayerContainer()
+      );
+    }
+    if (audioSources().length) return false;
     if (question && looksLikeQuestion(question)) return false;
     return Boolean(
       nextSectionTab() ||

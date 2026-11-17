@@ -97,6 +97,9 @@
           <h1 class="page-title">首页</h1>
           <p class="page-subtitle">选择网页、准备语音样本和常用配置；其余选项在对应页面中调整。</p>
         </div>
+        <div class="home-page-actions">
+          <button class="btn btn-sm" data-action="guide">操作指南</button>
+        </div>
       </div>
 
       <section class="card home-section">
@@ -799,6 +802,13 @@
     async function refreshHome() {
       try {
         home = await API.must("get_home");
+        const latestEvents = Array.isArray(home.events) ? home.events : [];
+        if (latestEvents.length) {
+          const bySeq = new Map(events.map((item) => [item.seq, item]));
+          latestEvents.forEach((item) => bySeq.set(item.seq, item));
+          events = Array.from(bySeq.values()).sort((a, b) => Number(a.seq || 0) - Number(b.seq || 0)).slice(-30);
+          renderLogs();
+        }
         updateSiteStates();
         renderStatusCards();
       } catch (error) {
@@ -816,6 +826,7 @@
       renderLogs();
     }
 
+    target.querySelector('[data-action="guide"]').addEventListener("click", () => App.navigate("guide"));
     target.querySelector('[data-action="refresh"]').addEventListener("click", () => void refreshHome());
     target.querySelector('[data-action="logs"]').addEventListener("click", () => App.navigate("logs"));
 

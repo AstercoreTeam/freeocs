@@ -23,7 +23,7 @@ def build(onefile: bool, clean: bool, name: str) -> Path:
     except ImportError:
         raise SystemExit("未安装 PyInstaller：uv pip install pyinstaller（或安装 dev extra）") from None
     sep = ";" if sys.platform == "win32" else ":"
-    data_dirs = ["web", "packages/dist", "extension/dist"]
+    data_dirs = ["web", "packages/dist", "extension/dist", "models"]
     cmd = [
         sys.executable,
         "-m",

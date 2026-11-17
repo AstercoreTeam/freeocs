@@ -158,10 +158,8 @@ def test_kokoclone_respects_configured_text_limit(tmp_path: Path) -> None:
         KokoCloneTTS(api).synthesize("超过五个字符的文本")
 
 
-def test_kokoclone_requires_reference(tmp_path: Path) -> None:
-    project = tmp_path / "kokoclone"
-    (project / "core").mkdir(parents=True)
-    (project / "core" / "cloner.py").write_text("", encoding="utf-8")
+def test_kokoclone_uses_bundled_moss_reference(tmp_path: Path) -> None:
+    project = make_external_project(tmp_path)
     api = make_api(tmp_path, project, tmp_path / "missing.wav")
-    with pytest.raises(ProviderError, match="参考音频"):
-        KokoCloneTTS(api).synthesize("Hello")
+    result = KokoCloneTTS(api).synthesize("Hello")
+    assert result.data.startswith(b"RIFF")

@@ -120,6 +120,45 @@ class UiApi:
         except Exception as exc:  # noqa: BLE001
             return self._fail(exc)
 
+    def get_reports(self) -> dict[str, Any]:
+        try:
+            roots = list((self.app.paths.data_dir / "package-data").glob("*/reports"))
+            reports: list[dict[str, Any]] = []
+            for root in roots:
+                if not root.is_dir():
+                    continue
+                for path in sorted(root.glob("*.zip"), key=lambda item: item.stat().st_mtime, reverse=True):
+                    reports.append(
+                        {
+                            "name": path.name,
+                            "path": str(path),
+                            "size": path.stat().st_size,
+                            "modified": path.stat().st_mtime,
+                        }
+                    )
+            return self._ok(
+                reports=reports,
+                folder=str(self.app.paths.data_dir / "package-data" / "ucampus" / "reports"),
+                issue="https://github.com/AstercoreTeam/freeocs/issues",
+            )
+        except Exception as exc:  # noqa: BLE001
+            return self._fail(exc)
+
+    def open_reports(self) -> dict[str, Any]:
+        try:
+            folder = self.app.paths.data_dir / "package-data" / "ucampus" / "reports"
+            folder.mkdir(parents=True, exist_ok=True)
+            if sys.platform == "win32":
+                os.startfile(str(folder))  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(folder)])
+            else:
+                subprocess.Popen(["xdg-open", str(folder)])
+            webbrowser.open("https://github.com/AstercoreTeam/freeocs/issues")
+            return self._ok(folder=str(folder), issue="https://github.com/AstercoreTeam/freeocs/issues")
+        except Exception as exc:  # noqa: BLE001
+            return self._fail(exc)
+
     def get_usage(self) -> dict[str, Any]:
         try:
             return self._ok(usage=self.app.usage.summary())

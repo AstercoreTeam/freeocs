@@ -2,7 +2,7 @@
 
 FreeOCS 安装包只包含运行时依赖，**不包含模型权重**。本文列出可选模型的下载地址、目录结构和设置页对应关系。
 
-模型体积较大，请先确认磁盘空间。模型文件不需要放进安装目录，放在任意本地目录即可。
+模型体积较大，请先确认磁盘空间。模型文件统一放在程序目录的 `models/`；构建应用时会随程序目录分发（不进入 git）。
 
 ## 0. 应用内下载
 
@@ -34,10 +34,10 @@ FreeOCS 安装包只包含运行时依赖，**不包含模型权重**。本文�
 
 ## 2. 推荐目录
 
-建议统一放在项目外的模型目录，例如：
+建议统一放在程序目录的 `models/`，例如：
 
 ```text
-~/FreeOCS-models/
+models/
 ├── faster-whisper-base/
 │   ├── model.bin
 │   ├── config.json
@@ -73,16 +73,16 @@ python -m pip install -U huggingface_hub
 下载整个模型目录：
 
 ```bash
-mkdir -p ~/FreeOCS-models/faster-whisper-base
+mkdir -p models/faster-whisper-base
 
 hf download Systran/faster-whisper-base \
-  --local-dir ~/FreeOCS-models/faster-whisper-base
+  --local-dir models/faster-whisper-base
 ```
 
 确认：
 
 ```bash
-ls ~/FreeOCS-models/faster-whisper-base/model.bin
+ls models/faster-whisper-base/model.bin
 ```
 
 设置：
@@ -91,7 +91,7 @@ ls ~/FreeOCS-models/faster-whisper-base/model.bin
 设置 → 本地语音转写 → 模型目录
 ```
 
-选择 `~/FreeOCS-models/faster-whisper-base`。
+选择 `models/faster-whisper-base`。
 
 目录中必须有 `model.bin`。
 
@@ -100,15 +100,15 @@ ls ~/FreeOCS-models/faster-whisper-base/model.bin
 ### 英文
 
 ```bash
-mkdir -p ~/FreeOCS-models/kokoclone
+mkdir -p models/kokoclone
 
 hf download PatnaikAshish/kokoclone \
   model/kokoro.onnx \
-  --local-dir ~/FreeOCS-models/kokoclone
+  --local-dir models/kokoclone
 
 hf download PatnaikAshish/kokoclone \
   voice/voices-v1.0.bin \
-  --local-dir ~/FreeOCS-models/kokoclone
+  --local-dir models/kokoclone
 ```
 
 ### 中文
@@ -116,19 +116,19 @@ hf download PatnaikAshish/kokoclone \
 ```bash
 hf download PatnaikAshish/kokoclone \
   model/kokoro-v1.1-zh.onnx \
-  --local-dir ~/FreeOCS-models/kokoclone
+  --local-dir models/kokoclone
 
 hf download PatnaikAshish/kokoclone \
   voice/voices-v1.1-zh.bin \
-  --local-dir ~/FreeOCS-models/kokoclone
+  --local-dir models/kokoclone
 ```
 
 设置：
 
 ```text
 设置 → 克隆语音（KokoClone）
-  Kokoro ONNX 模型   → ~/FreeOCS-models/kokoclone/model/kokoro.onnx
-  Kokoro voices 文件 → ~/FreeOCS-models/kokoclone/voice/voices-v1.0.bin
+  Kokoro ONNX 模型   → models/kokoclone/model/kokoro.onnx
+  Kokoro voices 文件 → models/kokoclone/voice/voices-v1.0.bin
 ```
 
 中文时选择中文模型和中文 voices，并把语言设为 `zh`。如果中文/日文合成提示缺少 vocab，
@@ -137,23 +137,23 @@ hf download PatnaikAshish/kokoclone \
 ## 5. 下载 Kanade
 
 ```bash
-mkdir -p ~/FreeOCS-models/kanade
+mkdir -p models/kanade
 
 hf download frothywater/kanade-12.5hz \
   config.yaml \
-  --local-dir ~/FreeOCS-models/kanade
+  --local-dir models/kanade
 
 hf download frothywater/kanade-12.5hz \
   model.safetensors \
-  --local-dir ~/FreeOCS-models/kanade
+  --local-dir models/kanade
 ```
 
 设置：
 
 ```text
 设置 → 克隆语音（KokoClone）
-  Kanade config.yaml      → ~/FreeOCS-models/kanade/config.yaml
-  Kanade model.safetensors → ~/FreeOCS-models/kanade/model.safetensors
+  Kanade config.yaml      → models/kanade/config.yaml
+  Kanade model.safetensors → models/kanade/model.safetensors
 ```
 
 ## 6. Vocoder
@@ -171,23 +171,23 @@ charactr/vocos-mel-24khz
 如果 `hf` 命令不可用，可以使用 `curl`：
 
 ```bash
-mkdir -p ~/FreeOCS-models/faster-whisper-base
-curl -L -o ~/FreeOCS-models/faster-whisper-base/model.bin \
+mkdir -p models/faster-whisper-base
+curl -L -o models/faster-whisper-base/model.bin \
   https://huggingface.co/Systran/faster-whisper-base/resolve/main/model.bin
 
-mkdir -p ~/FreeOCS-models/kokoclone/model
-curl -L -o ~/FreeOCS-models/kokoclone/model/kokoro.onnx \
+mkdir -p models/kokoclone/model
+curl -L -o models/kokoclone/model/kokoro.onnx \
   https://huggingface.co/PatnaikAshish/kokoclone/resolve/main/model/kokoro.onnx
 
-mkdir -p ~/FreeOCS-models/kokoclone/voice
-curl -L -o ~/FreeOCS-models/kokoclone/voice/voices-v1.0.bin \
+mkdir -p models/kokoclone/voice
+curl -L -o models/kokoclone/voice/voices-v1.0.bin \
   https://huggingface.co/PatnaikAshish/kokoclone/resolve/main/voice/voices-v1.0.bin
 
-mkdir -p ~/FreeOCS-models/kanade
-curl -L -o ~/FreeOCS-models/kanade/config.yaml \
+mkdir -p models/kanade
+curl -L -o models/kanade/config.yaml \
   https://huggingface.co/frothywater/kanade-12.5hz/resolve/main/config.yaml
 
-curl -L -o ~/FreeOCS-models/kanade/model.safetensors \
+curl -L -o models/kanade/model.safetensors \
   https://huggingface.co/frothywater/kanade-12.5hz/resolve/main/model.safetensors
 ```
 

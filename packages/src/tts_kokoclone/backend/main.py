@@ -13,6 +13,7 @@ so the main application stays lightweight.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import uuid
@@ -42,6 +43,7 @@ class KokoCloneTTS:
             "language": str(get("language", "en") or "en").strip().lower(),
             "max_chars": int(get("max_chars", 0) or 0),
             "timeout": float(get("timeout", 600) or 600),
+            "torch_home": "",
         }
 
     def _python(self, settings: dict[str, Any], project: Path) -> str:
@@ -53,9 +55,58 @@ class KokoCloneTTS:
             project / ".venv" / "Scripts" / "python.exe",
         ]
         for candidate in candidates:
+            # The bundled KokoClone checkout may contain a Windows-only venv;
+            # never try to execute its python.exe on Linux.
+            if candidate.name.lower() == "python.exe" and sys.platform != "win32":
+                continue
             if candidate.is_file():
                 return str(candidate)
         return sys.executable
+
+    def _models_root(self) -> Path | None:
+        candidates: list[Path] = []
+        here = Path(__file__).resolve()
+        for parent in here.parents:
+            candidates.append(parent / "models")
+        candidates.extend(
+            [
+                Path(sys.executable).resolve().parent / "models",
+                Path(sys.executable).resolve().parent / "_internal" / "models",
+                Path.cwd() / "models",
+            ]
+        )
+        for candidate in candidates:
+            if (
+                (candidate / "kokoro" / "kokoro.onnx").is_file()
+                and (candidate / "kokoro" / "voices-v1.0.bin").is_file()
+                and (candidate / "kanade" / "config.yaml").is_file()
+                and (candidate / "kanade" / "model.safetensors").is_file()
+            ):
+                return candidate
+        return None
+
+    def _apply_local_model_defaults(self, settings: dict[str, Any]) -> None:
+        # External mode deliberately uses the selected external project.
+        if settings.get("engine") == "external":
+            return
+        root = self._models_root()
+        if root is None:
+            return
+        defaults = {
+            "kokoro_model": root / "kokoro" / "kokoro.onnx",
+            "voices_file": root / "kokoro" / "voices-v1.0.bin",
+            "kanade_config": root / "kanade" / "config.yaml",
+            "kanade_weights": root / "kanade" / "model.safetensors",
+        }
+        for key, path in defaults.items():
+            if not settings[key] and path.is_file():
+                settings[key] = str(path)
+        vocoder = root / "vocoder"
+        if not settings["vocoder_dir"] and (vocoder / "config.yaml").is_file():
+            settings["vocoder_dir"] = str(vocoder)
+        torch_home = root / "torch"
+        if (torch_home / "hub" / "checkpoints" / "wavlm_base_plus.pth").is_file():
+            settings["torch_home"] = str(torch_home)
 
     def synthesize(
         self,
@@ -69,6 +120,7 @@ class KokoCloneTTS:
         if not text:
             raise ProviderError("TTS 文本为空", provider="tts_kokoclone")
         settings = self._settings()
+        self._apply_local_model_defaults(settings)
         max_chars = settings["max_chars"]
         if max_chars > 0 and len(text) > max_chars:
             raise ProviderError(
@@ -78,6 +130,12 @@ class KokoCloneTTS:
         reference = (
             Path(settings["reference_audio"]).expanduser() if settings["reference_audio"] else None
         )
+        if reference is None or not reference.is_file():
+            # Samples are taken from the MOSS-TTS-Nano examples.
+            sample_name = "reference_zh_1.wav" if (language or settings["language"]) == "zh" else "reference_en_2.wav"
+            bundled = Path(__file__).resolve().parent / "assets" / sample_name
+            if bundled.is_file():
+                reference = bundled
         if reference is None or not reference.is_file():
             raise ProviderError(
                 "未配置用于克隆的参考音频；请到设置 → 克隆语音选择一段 3-10 秒人声。",
@@ -113,7 +171,7 @@ class KokoCloneTTS:
         project = Path(settings["project_dir"]).expanduser() if settings["project_dir"] else None
         if project is None or not project.is_dir():
             raise ProviderError(
-                "未配置模型文件或 KokoClone 目录；请到设置 → 克隆语音选择 Kokoro/Kanade 模型文件。",
+                "未找到 models/kokoro 与 models/kanade；请把模型放到程序目录的 models/ 下，或显式配置外部 KokoClone。",
                 provider="tts_kokoclone",
             )
         if not (project / "core" / "cloner.py").is_file():
@@ -219,6 +277,9 @@ class KokoCloneTTS:
         output_path: Path,
     ) -> AudioResult:
         try:
+            torch_home = settings.get("torch_home", "")
+            if torch_home:
+                os.environ["TORCH_HOME"] = torch_home
             import torch
             from kanade_tokenizer import KanadeModel, load_vocoder
 
@@ -237,10 +298,24 @@ class KokoCloneTTS:
             )
             if settings["vocoder_dir"]:
                 from vocos import Vocos
+                from vocos.feature_extractors import EncodecFeatures
 
-                cloner.vocoder = (
-                    Vocos.from_pretrained(settings["vocoder_dir"]).eval().to(cloner.device)
+                vocoder_dir = Path(settings["vocoder_dir"])
+                model = Vocos.from_hparams(str(vocoder_dir / "config.yaml"))
+                state = torch.load(
+                    vocoder_dir / "pytorch_model.bin",
+                    map_location="cpu",
+                    weights_only=True,
                 )
+                if isinstance(model.feature_extractor, EncodecFeatures):
+                    state.update(
+                        {
+                            "feature_extractor.encodec." + key: value
+                            for key, value in model.feature_extractor.encodec.state_dict().items()
+                        }
+                    )
+                model.load_state_dict(state)
+                cloner.vocoder = model.eval().to(cloner.device)
             else:
                 cloner.vocoder = load_vocoder(cloner.kanade.config.vocoder_name).to(cloner.device)
             cloner.sample_rate = cloner.kanade.config.sample_rate

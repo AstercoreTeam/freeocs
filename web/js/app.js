@@ -166,8 +166,9 @@
     const content = document.getElementById("page-content");
     content.innerHTML = '<div class="page-loading"><span class="spinner"></span> 正在加载…</div>';
     try {
-      await loadScript(`pages/${id}/page.js`);
-      loadCss(`pages/${id}/page.css`);
+      const assetVersion = "20261117-2";
+      await loadScript(`pages/${id}/page.js?v=${assetVersion}`);
+      loadCss(`pages/${id}/page.css?v=${assetVersion}`);
       const response = await fetch(`pages/${id}/index.html`, { cache: "no-store" });
       if (!response.ok) throw new Error(`页面不存在：pages/${id}/index.html`);
       const html = await response.text();

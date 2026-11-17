@@ -275,6 +275,7 @@
         parts.push(`<button class="btn ${style}" data-action="${UI.escapeHtml(action.id)}" ${available ? "" : "disabled"}>${UI.escapeHtml(action.label || action.id)}</button>`);
       }
       parts.push(`<button class="btn btn-ghost" id="module-back">返回应用</button>`);
+      parts.push(`<button class="btn btn-ghost" id="module-report">向开发者报告</button>`);
       container.innerHTML = parts.join("");
       const start = container.querySelector("#module-start");
       const stop = container.querySelector("#module-stop");
@@ -282,9 +283,27 @@
       if (stop) stop.addEventListener("click", () => this.stop());
       const back = container.querySelector("#module-back");
       if (back) back.addEventListener("click", () => App.navigate("apps"));
+      const report = container.querySelector("#module-report");
+      if (report) report.addEventListener("click", () => void this.report());
       container.querySelectorAll("[data-action]").forEach((button) => {
         button.addEventListener("click", () => this.invoke(button.dataset.action));
       });
+    }
+
+    async report() {
+      try {
+        const info = await API.must("get_reports");
+        const count = (info.reports || []).length;
+        const confirmed = await UI.modal({
+          title: "向开发者报告",
+          message: `U校园未识别页面的 AI 报告会打包成 zip。\n当前已有 ${count} 个报告。\n\n目录：${info.folder || "未知"}\nIssue：${info.issue || "https://github.com/AstercoreTeam/freeocs/issues"}\n\n点击“打开目录和 Issue”，把对应的 zip 附到 Issue 中。`,
+          confirmText: "打开目录和 Issue",
+          cancelText: "取消",
+        });
+        if (confirmed) await API.must("open_reports");
+      } catch (error) {
+        UI.toast(error.message || "无法读取报告目录", "error");
+      }
     }
 
     bindTabs() {

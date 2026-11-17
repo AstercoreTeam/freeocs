@@ -21,7 +21,7 @@ class FakeProvider:
         return self.name
 
 
-def test_local_first_tts_default_prefers_system(tmp_path) -> None:
+def test_local_first_tts_default_prefers_kokoclone(tmp_path) -> None:
     registry = CapabilityRegistry()
     registry.register_provider("tts_system", "media.tts", FakeProvider("system"))
     registry.register_provider("tts_kokoclone", "media.tts", FakeProvider("clone"))
@@ -33,7 +33,7 @@ def test_local_first_tts_default_prefers_system(tmp_path) -> None:
 
     Application._apply_preferred_capabilities(app)
 
-    assert app.registry.binding("media.tts") == "tts_system"
+    assert app.registry.binding("media.tts") == "tts_kokoclone"
     assert app.registry.binding("media.asr") == "asr_whisper"
     assert app.registry.binding("media.ocr") == "ocr_rapid"
 
