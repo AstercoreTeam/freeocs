@@ -16,7 +16,7 @@ from freeocs.sdk import SettingsError
 
 def test_defaults_and_sections(tmp_path: Path) -> None:
     store = SettingsStore(tmp_path / "settings.json")
-    assert store.core_get("llm", "model") == "deepseek-chat"
+    assert store.core_get("llm", "model") == "deepseek-flash"
     assert store.section_values("llm")["provider_mode"] == "cloud"
     ids = [section["id"] for section in store.schema()]
     assert ids[:5] == ["legal", "ui", "llm", "usage", "bridge"]

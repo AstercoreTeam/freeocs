@@ -166,7 +166,7 @@ CORE_SECTIONS: list[dict[str, Any]] = [
                 placeholder="sk-...",
                 help="仅保存在本机配置文件（权限 0600），不会上传。",
             ),
-            field("model", "模型", "text", "deepseek-chat", required=True),
+            field("model", "模型", "text", "deepseek-flash", required=True),
             field("temperature", "温度", "number", 0.2, min=0, max=2, step=0.1),
             field("max_tokens", "最大输出", "integer", 2048, min=1, max=65536, step=1),
             field("timeout", "超时（秒）", "number", 300, min=5, max=3600, step=5),

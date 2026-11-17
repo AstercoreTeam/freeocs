@@ -387,6 +387,12 @@ class UcampusModule(Module):
         timeout = float(self.ctx.settings.get("answer_timeout", 300) or 300)
 
         def ask(user_prompt: str) -> tuple[str, str, str]:
+            # Reasoning models can spend the whole default 2048-token budget on
+            # reasoning for a 20-blank classification task, leaving content
+            # empty.  Give fill-in requests enough room for reasoning + answer.
+            kwargs: dict[str, Any] = {"temperature": 0.2, "timeout": timeout}
+            if question_type == "blanks" and blank_count > 0:
+                kwargs["max_tokens"] = max(8192, blank_count * 256)
             reply = llm.chat(
                 [
                     {
@@ -395,8 +401,7 @@ class UcampusModule(Module):
                     },
                     {"role": "user", "content": user_prompt},
                 ],
-                temperature=0.2,
-                timeout=timeout,
+                **kwargs,
             )
             text = str((reply.message or {}).get("content") or "")
             parsed, note = parse_answer(text, question_type, blank_count)

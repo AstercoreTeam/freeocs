@@ -147,7 +147,7 @@
           ${steps([
             { title: "填写 API 地址", text: "例如 https://api.deepseek.com 或 https://api.openai.com/v1。", code: "https://api.deepseek.com" },
             { title: "填写 API Key", text: "在设置 → 大模型中填写，保存后只显示“已配置”。" },
-            { title: "填写模型名", text: "例如 deepseek-chat、gpt-4o-mini、qwen2.5:7b。" },
+            { title: "填写模型名", text: "例如 deepseek-flash、gpt-4o-mini、qwen2.5:7b。" },
             { title: "测试连接", text: "在设置页点击“测试大模型”，确认返回正常。" },
           ])}
           <div class="form-actions">

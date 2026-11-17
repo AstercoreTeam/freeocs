@@ -137,7 +137,7 @@ class LLMProvider(Protocol):
 | --- | --- | --- | --- |
 | `base_url` | text | `https://api.deepseek.com` | OpenAI 兼容根地址，不以 `/v1` 结尾也可 |
 | `api_key` | password | 空 | 必填才能调用 |
-| `model` | text | `deepseek-chat` | 文本模型名 |
+| `model` | text | `deepseek-flash` | 文本模型名 |
 | `temperature` | number | `0.2` | 0–2 |
 | `max_tokens` | integer | `2048` | 上限 |
 | `timeout` | number | `300` | 秒 |

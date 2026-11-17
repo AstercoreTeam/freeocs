@@ -713,7 +713,7 @@
       const profiles = {
         cloud: {
           baseUrl: currentMode === "cloud" ? (llm.base_url || "https://api.deepseek.com") : "https://api.deepseek.com",
-          model: currentMode === "cloud" ? (llm.model || "deepseek-chat") : "deepseek-chat",
+          model: currentMode === "cloud" ? (llm.model || "deepseek-flash") : "deepseek-flash",
         },
         ollama: {
           baseUrl: currentMode === "ollama" ? (llm.base_url || OLLAMA_URL) : OLLAMA_URL,
