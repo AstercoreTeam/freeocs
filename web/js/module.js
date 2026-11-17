@@ -146,6 +146,8 @@
       this.polling = false;
       this.activeTab = "state";
       this.mounted = null;
+      this.sections = [];
+      this.settingsValues = {};
       this.onGlobalEvents = (event) => this.handleEvents(event.detail || []);
       this.onPanelRegistered = () => this.mountActivePanel();
       this.onVisibility = () => { if (!document.hidden) this.poll(); };
@@ -159,6 +161,7 @@
         this.state = this.module.state || {};
         const panelResult = await API.must("get_module_panels", this.moduleId);
         this.panels = panelResult.panels || [];
+        await this.loadSettings();
         this.render();
         await this.loadPanelAssets();
         document.addEventListener("focs:events", this.onGlobalEvents);
@@ -171,6 +174,37 @@
       }
     }
 
+    async loadSettings() {
+      try {
+        const [schema, current] = await Promise.all([
+          API.must("get_settings_schema"),
+          API.must("get_settings_values"),
+        ]);
+        this.sections = (schema.sections || []).filter((section) => section.id === this.moduleId);
+        this.settingsValues = current.values || {};
+      } catch (error) {
+        console.warn("读取模块设置失败", error);
+      }
+      return this.sections;
+    }
+
+    renderModuleSettings() {
+      const container = this.container.querySelector("#module-settings");
+      if (!container) return;
+      if (!this.sections.length) {
+        container.innerHTML = UI.empty("该模块没有可配置项", "…");
+        return;
+      }
+      SettingsUI.renderSections(container, this.sections, this.settingsValues, async () => {
+        try {
+          const current = await API.must("get_settings_values");
+          this.settingsValues = current.values || {};
+        } catch (error) {
+          console.warn("刷新模块设置失败", error);
+        }
+      });
+    }
+
     render() {
       const module = this.module;
       const state = this.state || {};
@@ -178,6 +212,7 @@
       const panels = this.panels || [];
       const tabs = [
         `<button class="tab active" data-tab="state">运行状态</button>`,
+        ...(this.sections.length ? [`<button class="tab" data-tab="settings">配置</button>`] : []),
         ...panels.map((panel) => `<button class="tab" data-tab="panel-${UI.escapeHtml(panel.id)}">${UI.escapeHtml(panel.title)}</button>`),
         `<button class="tab" data-tab="logs">日志</button>`,
       ].join("");
@@ -216,6 +251,7 @@
                 <div class="form-help mt-8">本应用不会自动提交、交卷或发布，请在提交页手动确认。</div>
               </div>
             </div>
+            ${this.sections.length ? '<div class="tab-panel" data-panel="settings"><div class="card"><div id="module-settings"></div></div></div>' : ""}
             ${panels.map((panel) => `<div class="tab-panel" data-panel="panel-${UI.escapeHtml(panel.id)}"><div class="card" id="panel-container-${UI.escapeHtml(panel.id)}">${UI.empty("面板加载中…", "…")}</div></div>`).join("")}
             <div class="tab-panel" data-panel="logs"><div class="card"><div id="module-logs">${renderLogs(this.logs)}</div></div></div>
           </div>
@@ -267,6 +303,7 @@
         panel.classList.toggle("active", panel.dataset.panel === id);
       });
       if (id === "logs") this.renderLogs();
+      if (id === "settings") this.renderModuleSettings();
       this.mountActivePanel();
     }
 

@@ -4,6 +4,16 @@ FreeOCS 安装包只包含运行时依赖，**不包含模型权重**。本文�
 
 模型体积较大，请先确认磁盘空间。模型文件不需要放进安装目录，放在任意本地目录即可。
 
+## 0. 应用内下载
+
+打开左侧「模型下载」页面，选择文件模型和保存目录后开始下载。默认目录为项目根目录 `./models/`；
+可通过目录选择器或输入路径选择任意有写入权限的位置。Windows 和 Linux 都使用本机路径格式。
+下载由 Python 后端流式完成，页面会显示进度，也可以取消。已存在的非空文件会跳过，未完成的临时文件会在失败或取消时清理。
+
+模型下载页还提供 Ollama 模型拉取；Ollama 管理其模型存储位置，此操作不使用上方的保存目录。
+请先安装并启动 Ollama，再拉取推荐模型 `qwen2.5vl:7b`。文件模型许可与 FreeOCS 许可相互独立；
+下载前请查看对应模型仓库的许可。云端大模型和本地 Ollama 的连接配置位于首页。
+
 ## 1. 模型一览
 
 | 用途 | 模型/文件 | 来源 |
@@ -15,6 +25,7 @@ FreeOCS 安装包只包含运行时依赖，**不包含模型权重**。本文�
 | 中文 voices | `voices-v1.1-zh.bin` | <https://huggingface.co/PatnaikAshish/kokoclone/tree/main/voice> |
 | Kanade 配置 | `config.yaml` | <https://huggingface.co/frothywater/kanade-12.5hz> |
 | Kanade 权重 | `model.safetensors` | <https://huggingface.co/frothywater/kanade-12.5hz> |
+| 本地视觉语言模型 | `qwen2.5vl:7b`（Ollama） | [Ollama 模型库](https://ollama.com/library/qwen2.5vl) |
 | Vocoder（可选） | Vocos mel 24k | <https://huggingface.co/charactr/vocos-mel-24khz> |
 | Kokoro vocab（中文/日文可选） | `config.json` | <https://huggingface.co/PatnaikAshish/kokoclone/tree/main/model> |
 
@@ -50,6 +61,8 @@ kokoclone/voice/voices-v1.1-zh.bin
 ```
 
 ## 3. 下载 faster-whisper
+
+应用内下载会将文件保存到 `<保存目录>/faster-whisper-base/`，可在「设置 → 本地语音转写 → 模型目录」选择该目录。
 
 安装 Hugging Face CLI：
 

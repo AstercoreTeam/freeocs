@@ -15,10 +15,12 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from .browser_launcher import supported_websites
 from .capabilities import CapabilityRegistry
 from .config import SettingsStore
 from .events import EventBus
 from .logging_setup import setup_logging
+from .model_downloads import ModelDownloadManager
 from .modules import ModuleHost
 from .packages import PackageManager
 from .paths import AppPaths, build_paths
@@ -41,6 +43,7 @@ class Application:
     ) -> None:
         self.dev = dev
         self.paths: AppPaths = build_paths(portable=portable).ensure()
+        self.model_downloads = ModelDownloadManager(self.paths.default_model_download_dir)
         self.settings = SettingsStore(self.paths.settings_file)
         level = log_level or str(self.settings.core_get("ui", "log_level", "info"))
         setup_logging(self.paths.log_file, level)
@@ -120,7 +123,7 @@ class Application:
         """Local-first defaults when the user has not bound a capability yet."""
         preferred = {
             "media.asr": "asr_whisper",
-            "media.tts": "tts_system",
+            "media.tts": "tts_kokoclone",
             "media.ocr": "ocr_rapid",
         }
         current = self.settings.capability_bindings()
@@ -161,7 +164,9 @@ class Application:
                 "debug": self.dev,
                 "private_mode": False,
                 "storage_path": str(storage),
-                "icon": str(web_dir / "favicon.ico") if (web_dir / "favicon.ico").is_file() else None,
+                "icon": str(web_dir / "favicon.ico")
+                if (web_dir / "favicon.ico").is_file()
+                else None,
             }
             # pywebview may try Qt first even when only GTK/WebKit2 is installed.
             # Force the Linux backend so the window actually opens.
@@ -172,6 +177,10 @@ class Application:
             self.shutdown()
 
     def shutdown(self) -> None:
+        try:
+            self.model_downloads.close()
+        except Exception:
+            logger.exception("停止模型下载失败")
         try:
             if self.modules is not None:
                 self.modules.close()
@@ -219,6 +228,7 @@ class Application:
         return {
             "ok": True,
             "app": self.app_info(),
+            "websites": supported_websites(),
             "llm": llm,
             "bridge": bridge,
             "packages": {

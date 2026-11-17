@@ -16,6 +16,7 @@ media.tts
 - 外部方式才需要 KokoClone 代码目录和 Python
 - **参考音频：3-10 秒单人、无背景音乐的人声**
 - 语言
+- 单次合成文本上限（默认 0 = 不限制）
 - 合成超时
 - 模型文件：
   - Kokoro ONNX（`kokoro.onnx`）

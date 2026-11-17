@@ -60,6 +60,10 @@ class AppPaths:
     def log_file(self) -> Path:
         return self.log_dir / "freeocs.log"
 
+    @property
+    def default_model_download_dir(self) -> Path:
+        return self.repo / "models"
+
     def ensure(self) -> AppPaths:
         for path in (
             self.config_dir,

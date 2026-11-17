@@ -26,6 +26,7 @@
   const NAV_ICONS = {
     home: "⌂",
     apps: "▦",
+    models: "↓",
     guide: "?",
     settings: "⚙",
     logs: "≣",
@@ -74,7 +75,7 @@
     chips.push({
       cls: llm.configured ? "ok" : "warn",
       text: llm.configured ? `大模型 ${llm.model || ""}` : "大模型未配置",
-      action: "settings",
+      action: "home",
       title: llm.base_url || "点击配置大模型",
     });
     chips.push({
@@ -82,12 +83,6 @@
       text: bridge.connected ? "浏览器已连接" : "浏览器未连接",
       action: "guide",
       title: bridge.server || "点击查看安装指南",
-    });
-    chips.push({
-      cls: "",
-      text: "手机未检测",
-      action: "guide",
-      title: "点击查看 ADB 指南",
     });
     container.innerHTML = chips.map((chip) => `
       <span class="status-chip ${chip.cls}" data-go="${chip.action}" title="${UI.escapeHtml(chip.title)}">
@@ -139,6 +134,7 @@
     return new Promise((resolve, reject) => {
       const script = document.createElement("script");
       script.src = src;
+      script.charset = "utf-8";
       script.onload = () => {
         state.loadedScripts.add(src);
         resolve();
@@ -203,16 +199,22 @@
     if (parts[0] === "module" && parts[1]) {
       return { id: "module", params: { id: decodeURIComponent(parts[1]) } };
     }
-    const known = ["home", "apps", "guide", "settings", "logs"];
+    if (parts[0] === "settings" && parts[1]) {
+      return { id: "settings", params: { section: decodeURIComponent(parts[1]) } };
+    }
+    const known = ["home", "apps", "models", "guide", "settings", "logs"];
     if (known.includes(parts[0])) return { id: parts[0], params: {} };
     return null;
   }
 
   function navigate(id, params = {}) {
     const nextParams = params || {};
-    const hash = id === "module" && nextParams.id
-      ? `#/module/${encodeURIComponent(nextParams.id)}`
-      : `#/${id}`;
+    let hash = `#/${id}`;
+    if (id === "module" && nextParams.id) {
+      hash = `#/module/${encodeURIComponent(nextParams.id)}`;
+    } else if (id === "settings" && nextParams.section) {
+      hash = `#/settings/${encodeURIComponent(nextParams.section)}`;
+    }
     if (location.hash === hash) {
       loadPage(id, nextParams);
       return;
@@ -276,7 +278,7 @@
       if (route) {
         await loadPage(route.id, route.params);
       } else {
-        await loadPage(["home", "apps", "guide"].includes(startPage) ? startPage : "home", {});
+        await loadPage(["home", "apps", "models", "guide"].includes(startPage) ? startPage : "home", {});
       }
       startEventPolling();
       state.statusTimer = window.setInterval(refreshBridgeStatus, 8000);

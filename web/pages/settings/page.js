@@ -72,6 +72,13 @@
         target.querySelector("#settings-refresh").addEventListener("click", () => reload());
       };
 
+      const focusSection = () => {
+        const sectionId = params && params.section;
+        if (!sectionId) return;
+        const section = target.querySelector(`#settings-section-${CSS.escape(sectionId)}`);
+        if (section) section.scrollIntoView({ behavior: "smooth", block: "start" });
+      };
+
       const reload = async () => {
         try {
           const data = await load();
@@ -85,6 +92,7 @@
       try {
         const data = await load();
         render(data);
+        focusSection();
       } catch (error) {
         target.innerHTML = `<div class="card">${UI.empty(error.message || "无法读取设置", "!")}</div>`;
       }

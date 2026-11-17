@@ -112,8 +112,7 @@
           "mode": "file",
           "label": "参考音频（用于克隆）",
           "default": "",
-          "required": true,
-          "help": "放一段 3-10 秒、单人、无背景音乐的人声 WAV/MP3；合成时用这段声音克隆。"
+          "help": "放一段 3-10 秒、单人、无背景音乐的人声；也可在首页上传或现场录制。合成时用这段声音克隆。"
         },
         {
           "key": "language",
@@ -154,6 +153,16 @@
               "label": "Español"
             }
           ]
+        },
+        {
+          "key": "max_chars",
+          "type": "integer",
+          "label": "单次合成文本上限（字符）",
+          "default": 0,
+          "min": 0,
+          "max": 200000,
+          "step": 100,
+          "help": "0 表示不限制；仅用于限制单次合成的文本长度。"
         },
         {
           "key": "timeout",

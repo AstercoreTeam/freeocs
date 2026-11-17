@@ -74,10 +74,15 @@ def build_prompt(payload: dict[str, Any]) -> str:
         parts.append('仅返回 JSON 对象，格式为 {"answer":"...","explanation":"..."}。')
     elif question_type == "blanks":
         count = blank_count or 0
-        parts.append(
-            f"页面共有 {count} 个空。请按空格顺序输出 {count} 行纯文本，"
-            "每行只写一个空的答案，不要编号，不要 JSON，不要解释。"
-        )
+        if count > 0:
+            parts.append(
+                f"页面恰好有 {count} 个空。请按空格顺序输出 {count} 行纯文本，"
+                "每行只写一个空的答案，行数必须等于空数，不要编号，不要 JSON，不要解释。"
+            )
+        else:
+            parts.append(
+                "这是多空填空题。请按空格顺序每行输出一个空的答案，不要编号，不要 JSON，不要解释。"
+            )
     else:
         parts.append(
             "请根据题目作答。选择题的 answer 写选项字母及选项内容；"
@@ -108,7 +113,7 @@ def _json_candidate(raw: str) -> Any:
         end = candidate.rfind("}")
         if 0 <= start < end:
             try:
-                return json.loads(candidate[start:end + 1])
+                return json.loads(candidate[start : end + 1])
             except json.JSONDecodeError:
                 pass
     return None
@@ -131,6 +136,16 @@ def _parse_standard(raw: str) -> tuple[str, str]:
     return answer.strip(), explanation.strip()
 
 
+_BLANK_PREFIX = re.compile(r"^\s*(?:[\[(（]?\d{1,3}[\]）)]?[.)、:：=-]?|[-*•])\s*")
+_INLINE_NUMBERED = re.compile(r"(?:^|\s)\d{1,3}[.)、:：]\s*(.+?)(?=(?:\s+\d{1,3}[.)、:：]\s*)|$)")
+
+
+def _clean_blank(value: str) -> str:
+    text = str(value or "").strip().strip("\"'`“”")
+    text = _BLANK_PREFIX.sub("", text)
+    return text.strip().strip("\"'`“”")
+
+
 def _parse_blanks(raw: str, count: int) -> str:
     candidate = (raw or "").strip()
     fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", candidate, re.DOTALL)
@@ -139,25 +154,53 @@ def _parse_blanks(raw: str, count: int) -> str:
     decoded = _json_candidate(candidate)
     values: list[str] = []
     if isinstance(decoded, list):
-        values = [str(item).strip() for item in decoded]
+        values = [_clean_blank(item) for item in decoded]
     elif isinstance(decoded, dict):
-        value = decoded.get("answer")
+        value = decoded.get("answer", decoded.get("answers"))
         if isinstance(value, list):
-            values = [str(item).strip() for item in value]
+            values = [_clean_blank(item) for item in value]
         elif isinstance(value, str):
-            values = [line.strip() for line in value.splitlines() if line.strip()]
+            values = [_clean_blank(line) for line in value.splitlines()]
         else:
-            values = [str(item).strip() for item in decoded.values()]
+            values = [_clean_blank(item) for item in decoded.values()]
     values = [value for value in values if value]
-    if count > 0 and len(values) >= count:
-        return "\n".join(values[:count])
-    fallback: list[str] = []
-    for line in candidate.splitlines():
-        value = re.sub(r"^\s*\d+\s*[.)、:：-]\s*", "", line).strip()
-        value = value.strip("\"'` ")
-        if value:
-            fallback.append(value)
-    return "\n".join(fallback)
+
+    if not values:
+        for line in candidate.splitlines():
+            value = _clean_blank(line)
+            if value:
+                values.append(value)
+
+    if count > 0:
+        # Key/value forms such as "1=apple" or "blank1: apple".
+        pairs = re.findall(
+            r"^\s*(?:blank\s*)?\d+\s*[=:：]\s*(.+)$", candidate, re.IGNORECASE | re.MULTILINE
+        )
+        cleaned = [_clean_blank(item) for item in pairs]
+        cleaned = [value for value in cleaned if value]
+        if len(cleaned) == count:
+            values = cleaned
+
+    if count > 0 and len(values) != count:
+        # A single line like "1. apple 2. banana" contains several answers.
+        inline = [
+            _clean_blank(match.group(1))
+            for match in _INLINE_NUMBERED.finditer(" ".join(candidate.splitlines()))
+        ]
+        inline = [value for value in inline if value]
+        if len(inline) == count:
+            values = inline
+
+    if count > 0 and len(values) < count:
+        # Fall back to strong separators only: "|", ";", "；" and tabs.
+        parts = [part for part in re.split(r"\s*[|;；\t]\s*", "\n".join(values)) if part.strip()]
+        if len(parts) > len(values):
+            values = [_clean_blank(part) for part in parts]
+            values = [value for value in values if value]
+
+    if count > 0 and len(values) > count:
+        values = values[:count]
+    return "\n".join(values)
 
 
 def _parse_matching(raw: str) -> str:

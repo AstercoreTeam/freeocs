@@ -31,8 +31,12 @@ class SystemTTS:
         text = (text or "").strip()
         if not text:
             raise ProviderError("TTS 文本为空")
-        if len(text) > 5000:
-            raise ProviderError("TTS 文本超过 5000 字符")
+        max_chars = int(self.api.settings.get("max_chars", 0) or 0)
+        if max_chars > 0 and len(text) > max_chars:
+            raise ProviderError(
+                f"TTS 文本超过单次合成上限（{max_chars} 字符）；可在插件设置中调整或设为 0 取消限制。",
+                provider="tts_system",
+            )
         try:
             import pyttsx3
         except ImportError as exc:

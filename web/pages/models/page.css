@@ -1,0 +1,46 @@
+/**
+ * Copyright 2026 AstercoreTeam
+ * Copyright 2026 qincnd <qincnd@qq.com>
+ * Copyright 2026 XueZicheng <xuezicheng842@outlook.com>
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+.model-target { margin-bottom: 14px; }
+.model-files {
+  display: grid;
+  gap: 5px;
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.model-repositories {
+  margin-bottom: 14px;
+  font-size: 12px;
+}
+.model-download-status { margin-top: 14px; }
+.model-status-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.model-progress-track {
+  height: 8px;
+  margin: 10px 0 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--bg-soft);
+}
+.model-progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary);
+  transition: width .2s ease;
+}
+
+@media (max-width: 760px) {
+  .grid-2 { grid-template-columns: 1fr; }
+}

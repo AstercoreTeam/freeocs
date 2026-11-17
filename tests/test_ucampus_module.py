@@ -14,7 +14,7 @@ from freeocs.config import SettingsStore
 from freeocs.events import EventBus
 from freeocs.modules import ModuleHost
 from freeocs.packages import PackageManager
-from freeocs.sdk import ChatResult
+from freeocs.sdk import ChatResult, ModuleError
 from freeocs.transports.browser_bridge import BrowserBridge
 
 from .helpers import ROOT, make_paths
@@ -45,6 +45,20 @@ class FakePageLLM:
                 ),
             }
         )
+
+    def close(self) -> None:
+        return None
+
+
+class FakeSequenceLLM:
+    def __init__(self, replies: list[str]) -> None:
+        self.replies = list(replies)
+        self.prompts: list[str] = []
+
+    def chat(self, messages, **kwargs):
+        self.prompts.append(str(messages[-1].get("content", "")))
+        reply = self.replies.pop(0) if self.replies else ""
+        return ChatResult(message={"role": "assistant", "content": reply})
 
     def close(self) -> None:
         return None
@@ -171,6 +185,55 @@ def test_ucampus_answer(ucampus_host) -> None:
     assert result["explanation"] == "ok"
 
 
+def test_ucampus_poll_includes_settings(ucampus_host) -> None:
+    host, _registry, _manager = ucampus_host
+    poll = host.handle_agent_request(
+        "ucampus",
+        "poll",
+        {"client_id": "c1", "url": "https://course.unipus.cn/x", "has_content": True},
+    )
+    assert poll["settings"]["auto_record_speaking"] is True
+
+
+def test_ucampus_answer_retries_blank_count_mismatch(ucampus_host) -> None:
+    host, registry, _manager = ucampus_host
+    llm = FakeSequenceLLM(["one", "one\ntwo\nthree"])
+    registry.register_provider("seq_llm", "llm.chat", llm, title="seq")
+    registry.set_binding("llm.chat", "seq_llm")
+
+    result = host.handle_agent_request(
+        "ucampus",
+        "answer",
+        {
+            "question": "Fill in the blanks.",
+            "question_type": "blanks",
+            "blank_count": 3,
+        },
+    )
+
+    assert result["answer"] == "one\ntwo\nthree"
+    assert len(llm.prompts) == 2
+    assert "恰好有 3 个空" in llm.prompts[1]
+
+
+def test_ucampus_answer_blank_mismatch_after_retry_raises(ucampus_host) -> None:
+    host, registry, _manager = ucampus_host
+    llm = FakeSequenceLLM(["one", "one"])
+    registry.register_provider("seq_llm", "llm.chat", llm, title="seq")
+    registry.set_binding("llm.chat", "seq_llm")
+
+    with pytest.raises(ModuleError, match="1 个填空答案，页面有 2 个空"):
+        host.handle_agent_request(
+            "ucampus",
+            "answer",
+            {
+                "question": "Fill in the blanks.",
+                "question_type": "blanks",
+                "blank_count": 2,
+            },
+        )
+
+
 def test_ucampus_waiting_and_finish(ucampus_host) -> None:
     host, _registry, _manager = ucampus_host
     host.start("ucampus")
@@ -233,7 +296,14 @@ def test_page_agent_has_no_auto_submit() -> None:
     section = code[start:end]
     assert '"提交"' not in section
     assert "confirmSubmitDialog" in code
-    assert "button.click();" not in code[code.index("async function confirmSubmitDialog"):code.index("async function clickPageAction")]
+    assert (
+        "button.click();"
+        not in code[
+            code.index("async function confirmSubmitDialog") : code.index(
+                "async function clickPageAction"
+            )
+        ]
+    )
     assert "freeocs-ucampus-panel" in code
     assert "updateControlPanel" in code
     assert "runWebFallback" in code

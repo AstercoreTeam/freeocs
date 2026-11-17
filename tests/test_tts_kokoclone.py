@@ -122,6 +122,42 @@ def test_kokoclone_uses_selected_models(tmp_path: Path) -> None:
     assert len(result.data) > 44
 
 
+def make_external_project(tmp_path: Path) -> Path:
+    project = tmp_path / "kokoclone"
+    (project / "core").mkdir(parents=True)
+    (project / "core" / "__init__.py").write_text("", encoding="utf-8")
+    (project / "core" / "cloner.py").write_text(
+        "import wave\n"
+        "class KokoClone:\n"
+        "    def generate(self, text, lang, reference_audio, output_path):\n"
+        "        with wave.open(output_path, 'wb') as wav:\n"
+        "            wav.setnchannels(1); wav.setsampwidth(2); wav.setframerate(16000)\n"
+        "            wav.writeframes(b'\\x00\\x00' * 160)\n",
+        encoding="utf-8",
+    )
+    reference = tmp_path / "reference.wav"
+    reference.write_bytes(b"RIFF" + b"\x00" * 100)
+    return project
+
+
+def test_kokoclone_has_no_text_limit_by_default(tmp_path: Path) -> None:
+    project = make_external_project(tmp_path)
+    api = make_api(tmp_path, project, tmp_path / "reference.wav")
+
+    assert api.settings.values.get("max_chars") is None
+    result = KokoCloneTTS(api).synthesize("长文本" * 3000)
+    assert result.data.startswith(b"RIFF")
+
+
+def test_kokoclone_respects_configured_text_limit(tmp_path: Path) -> None:
+    project = make_external_project(tmp_path)
+    api = make_api(tmp_path, project, tmp_path / "reference.wav")
+    api.settings.values["max_chars"] = 5
+
+    with pytest.raises(ProviderError, match="单次合成上限"):
+        KokoCloneTTS(api).synthesize("超过五个字符的文本")
+
+
 def test_kokoclone_requires_reference(tmp_path: Path) -> None:
     project = tmp_path / "kokoclone"
     (project / "core").mkdir(parents=True)

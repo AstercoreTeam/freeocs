@@ -42,6 +42,17 @@ Windows：
 - 随包携带 `adb.exe`、`AdbWinApi.dll`、`AdbWinUsbApi.dll`。
 - SAPI5 提供系统 TTS。
 
+Windows 开发环境（PowerShell）：
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe scripts\build_packages.py
+.\.venv\Scripts\python.exe scripts\build_extension.py
+$env:FREEOCS_PACKAGES = "source"
+.\.venv\Scripts\python.exe main.py --dev
+```
+
 ## 2. 依赖划分
 
 `pyproject.toml` 目标结构：
@@ -172,6 +183,8 @@ uv run python scripts/build_app.py --linux
 uv run python scripts/build_app.py --windows   # 在 Windows 上执行
 ```
 
+目标参数必须与当前构建主机一致；PyInstaller 不做跨平台构建。
+
 **推荐 onedir**：
 
 ```bash
@@ -232,15 +245,15 @@ Windows 交付：
 | `test_settings.py` | 默认值、类型归一化、密码保留/清除、迁移、原子写 |
 | `test_modules.py` | 生命周期、状态 schema、动作、面板元数据、线程停止 |
 | `test_browser_bridge.py` | 长轮询、结果回传、超时、Origin/头部校验、Agent 下发、租约 |
-| `test_adb_parsers.py` | XML fixtures：题型/题干/选项/按钮/提交页 |
+| `test_adb_parsers.py` | 通用 ADB XML 解析器 |
 | `test_ucampus_prompts.py` | 提示词构造、JSON/填空/匹配解析 |
-| `test_wisdomtree_reader.py` | 智慧树单选/多选/判断/WebView 占位 |
+| `test_wisdomtree.py` | 浏览器桥接、模型答案、租约与状态存储 |
 | `test_paths.py` | Linux/Windows 路径、portable 模式 |
 
 ### 6.2 集成测试
 
 - **本地 HTTP 服务**：模拟扩展客户端（长轮询、结果回传），验证模块端点与租约。
-- **假 ADB**：`FakeAdbDevice` 按脚本返回 XML/截图，验证点击与提交检测。
+- **假 ADB**：用于通用 Android 传输与解析器测试；智慧树不再依赖 ADB。
 - **假 LLM**：实现 `LLMProvider`，返回固定答案/工具调用序列。
 - **假扩展**：不启动浏览器，直接向 `/extension/result` 回传。
 - **包安装**：用临时目录构建/安装 zip，验证加载与禁用。
@@ -264,7 +277,7 @@ FREEOCS_PACKAGES=dist DISPLAY=:0 \
 
 - Chrome/Edge/Firefox 扩展安装、连接、DOM 操作、Agent 注入。
 - U校园：课程详情、目录、Practice、各题型、提交页、讨论页、视频、听力。
-- 智慧树：真机/模拟器，单选/多选/判断/提交页/断线。
+- 智慧树：浏览器扩展连接、课程/题目页面识别、答案填入、提交设置与跨子域导航。
 - 设置：密码保留、路径选择、能力绑定、端口冲突。
 - 打包产物：干净机器/新用户配置目录启动。
 
@@ -309,7 +322,7 @@ uv run pytest -q
 | M1 框架 | 启动窗口、导航、设置、包管理、能力注册、事件 | 能安装/加载 demo 包；设置持久化 |
 | M2 浏览器中继 | 本地服务、扩展 MV3/Firefox、指南页、DOM 操作 | Chrome/Firefox 能连接并执行 DOM 方法 |
 | M3 U校园 | 页面 Agent + Python 模块 + 面板 + 设置 | 验收清单 2.16 |
-| M4 智慧树 | ADB + Reader + Agent + 面板 | 验收清单 3.11 |
+| M4 智慧树 | 浏览器页面 Agent + Python 模块 + 面板 | 验收清单 3.11 |
 | M5 打包 | 内置包 zip、扩展 dist、PyInstaller、tar.gz | 干净环境可启动 |
 
 每个阶段结束更新 `docs/` 与 README。
@@ -333,8 +346,8 @@ uv run pytest -q
 - [ ] 插件/模块以 zip 安装、启用、禁用；缺失能力有提示。
 - [ ] 浏览器扩展（Chrome/Edge + Firefox）可安装并连接；指南页步骤可完成。
 - [ ] U校园模块通过 2.16 验收。
-- [ ] 智慧树模块通过 3.11 验收。
-- [ ] 所有路径不自动提交/交卷/发布；有测试覆盖。
+- [ ] 智慧树网页模块通过 3.11 验收。
+- [ ] 默认不自动提交/交卷/发布；配置了显式自动提交的流程有测试覆盖。
 - [ ] `pytest` 通过；`ruff` 通过。
 - [ ] `build_packages.py`、`build_extension.py`、`build_app.py` 可复现构建。
 - [ ] 打包产物在干净配置目录下可启动。

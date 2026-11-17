@@ -3,40 +3,126 @@
 # Copyright 2026 XueZicheng <xuezicheng842@outlook.com>
 # SPDX-License-Identifier: AGPL-3.0-only
 
-"""WisdomTree Android module: ADB + uiautomator + LLM agent."""
+"""Browser-agent module for the Zhihuishu course and quiz workflow."""
 
 from __future__ import annotations
 
+import json
+import os
 import re
 import threading
 import time
-import xml.etree.ElementTree as ET
+import uuid
+from datetime import datetime
 from typing import Any
+from urllib.parse import urlparse
 
-from freeocs.sdk import Module, ModuleContext, ModuleRunner
+from freeocs.sdk import Module, ModuleContext, ModuleError
 
-from .agent import AnswerAgent
-from .readers.base import Button, Option, PageData, center_of
-from .readers.wisdomtree import PACKAGE_NAME, WisdomTreeReader
-
-SYSTEM_PROMPT = (
-    "你是一个手机答题助手。通过工具读取页面、点击选项、进入下一题，直到完成所有题目。"
-    "选择题只点击与答案对应的选项；多选题可以多次调用 click_option 或一次 click_options。"
-    "检测到提交/交卷按钮时绝对不要点击，工具会返回 finished=true，应立即结束。"
-    "不要猜测无法识别的题目；无法继续时调用 finish 说明原因。"
-)
-SUBMIT_WORDS = ("提交", "交卷", "完成", "结束", "保存并提交")
-NEXT_WORDS = ("下一题", "下一步", "继续", "下一页")
-OPTION_RE = re.compile(r"^([A-Za-z])\s*[\.、\)．]\s*(.+)$")
-LOW_QUALITY = {"undefined", "null", "NaN", "true", "false"}
+STORAGE_FORMAT = "freeocs.wisdomtree.agent-state"
+STORAGE_VERSION = 1
+STORAGE_LIMIT = 1024 * 1024
+LEASE_TIMEOUT = 10.0
+QUESTION_TYPES = {"single", "multiple", "judge", "fill", "short"}
 
 
 def _now() -> str:
-    return time.strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
-def _sanitize_xml(xml: str) -> str:
-    return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", xml)
+def _allowed_page_url(value: Any) -> str:
+    url = str(value or "").strip()
+    parsed = urlparse(url)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or not (
+            parsed.hostname.lower() == "zhihuishu.com"
+            or parsed.hostname.lower().endswith(".zhihuishu.com")
+        )
+    ):
+        raise ModuleError("请求必须来自智慧树网页")
+    return url[:2048]
+
+
+def _parse_answers(reply: str) -> list[str]:
+    text = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", reply, flags=re.IGNORECASE)
+    decoder = json.JSONDecoder()
+    try:
+        parsed: Any = json.loads(text)
+    except json.JSONDecodeError:
+        parsed = None
+        for index, character in enumerate(text):
+            if character == "{":
+                try:
+                    parsed, _ = decoder.raw_decode(text[index:])
+                    break
+                except json.JSONDecodeError:
+                    continue
+    if not isinstance(parsed, dict):
+        raise ModuleError("模型未返回有效 JSON 答案")
+    answers = parsed.get("answers", parsed.get("answer"))
+    if isinstance(answers, dict):
+        answers = list(answers.values())
+    if isinstance(answers, str):
+        answers = [answers]
+    if not isinstance(answers, list) or not answers:
+        raise ModuleError("模型响应缺少非空 answers 数组")
+    if any(not isinstance(answer, (str, int, float)) for answer in answers):
+        raise ModuleError("模型 answers 必须只包含文本答案")
+    normalized = [str(answer).strip() for answer in answers]
+    if any(not answer for answer in normalized):
+        raise ModuleError("模型返回了空答案")
+    return normalized
+
+
+def _question_prompt(question: dict[str, Any]) -> str:
+    stem = question.get("stem")
+    question_type = question.get("type")
+    options = question.get("options", [])
+    blanks = question.get("blanks", 0)
+    if not isinstance(stem, str) or not stem.strip():
+        raise ModuleError("question.stem 不能为空")
+    if question_type not in QUESTION_TYPES:
+        raise ModuleError("不支持的题型")
+    if not isinstance(options, list) or len(options) > 100:
+        raise ModuleError("question.options 必须是最多 100 项的数组")
+    if isinstance(blanks, bool) or not isinstance(blanks, int) or blanks < 0:
+        raise ModuleError("question.blanks 必须是非负整数")
+
+    option_lines = []
+    for option in options:
+        if not isinstance(option, dict):
+            raise ModuleError("每个选项必须是 JSON 对象")
+        key = str(option.get("key", "")).strip()[:20]
+        text = str(option.get("text", "")).strip()[:1000]
+        if key or text:
+            option_lines.append(f"{key}. {text}".strip(". "))
+
+    type_names = {
+        "single": "单选题",
+        "multiple": "多选题",
+        "judge": "判断题",
+        "fill": "填空题",
+        "short": "主观题/简答题",
+    }
+    if question_type in {"single", "multiple", "judge"}:
+        answer_rule = "答案必须使用选项 key；单选/判断返回一个 key，多选返回多个 key。"
+    elif question_type == "fill":
+        answer_rule = f"按空的顺序返回答案数组（空数约为 {blanks}）。"
+    else:
+        answer_rule = "返回简洁、准确的作答内容，放在 answers 数组中。"
+
+    prompt = [f"题型：{type_names[question_type]}", f"题目：{stem.strip()[:12000]}"]
+    if option_lines:
+        prompt.extend(["选项：", *option_lines])
+    prompt.extend(
+        [
+            answer_rule,
+            '只输出合法 JSON，不要使用 Markdown 或解释，格式为 {"answers":["..."]}。',
+        ]
+    )
+    return "\n".join(prompt)
 
 
 class WisdomTreeModule(Module):
@@ -45,348 +131,449 @@ class WisdomTreeModule(Module):
 
     def __init__(self, ctx: ModuleContext) -> None:
         super().__init__(ctx)
-        self.runner = ModuleRunner(self)
         self._lock = threading.RLock()
-        self._device = ""
-        self._screen = (0, 0)
-        self._page: PageData | None = None
-        self._last_clicked = ""
-        self._submit_detected = False
-        self._finish_reason = ""
-        self._tool_events: list[dict[str, Any]] = []
-        self._reader = WisdomTreeReader()
+        self._active = False
+        self._running = False
+        self._revision = 0
+        self._lease_client = ""
+        self._lease_tab_id = ""
+        self._lease_seen = 0.0
+        self._target_tab_id = ""
+        self._page_url = ""
+        self._page_title = ""
+        self._page_mode = ""
+        self._question_type = ""
+        self._question = ""
+        self._options: list[str] = []
+        self._last_answer = ""
+        self._last_click: dict[str, Any] = {}
+        self._message = "等待智慧树页面"
+        self._state = "idle"
+        self._updated_at = _now()
+        self._completed_sets = 0
+        self._answered = 0
+        self._errors = 0
+        self._agent_last_seen = 0.0
+        self._storage_path = ctx.data_dir / "agent-state.json"
+        self._storage_lock = threading.Lock()
 
-    # -- Module API --------------------------------------------------------
     def start(self) -> None:
-        if self.runner.running:
-            return
+        target_tab_id = self._choose_target_tab()
         with self._lock:
-            self._page = None
-            self._last_clicked = ""
-            self._submit_detected = False
-            self._finish_reason = ""
-            self._tool_events.clear()
-        self.runner.set_extra(
-            device="",
-            screen="",
-            question_type="",
-            question="",
-            options=[],
-            last_clicked="",
-            tools=[],
-        )
-        self.runner.start(self._loop, initial_message="正在连接手机…")
-        self.ctx.log("info", "已请求开始；等待 ADB 设备")
+            self._active = True
+            self._running = True
+            self._revision += 1
+            self._target_tab_id = target_tab_id
+            self._lease_client = ""
+            self._lease_tab_id = ""
+            self._lease_seen = 0.0
+            self._completed_sets = 0
+            self._answered = 0
+            self._errors = 0
+            self._last_answer = ""
+            self._state = "running"
+            self._message = "等待当前智慧树标签页连接" if target_tab_id else "等待智慧树页面连接"
+            self._touch()
+        self.ctx.log("info", f"已请求开始智慧树自动化（目标标签页 {target_tab_id or '自动'}）")
 
     def stop(self) -> None:
-        self.runner.stop("正在停止…")
-        self.runner.join(5)
-        self.ctx.log("info", "已请求停止")
+        with self._lock:
+            self._active = False
+            self._running = False
+            self._revision += 1
+            self._lease_client = ""
+            self._lease_tab_id = ""
+            self._state = "idle"
+            self._message = "已停止"
+            self._touch()
+        self.ctx.log("info", "智慧树自动化已停止")
 
     def status(self) -> dict[str, Any]:
-        state = self.runner.status()
         with self._lock:
-            extra = {
-                "device": self._device,
-                "screen": f"{self._screen[0]}x{self._screen[1]}" if self._screen[0] else "",
-                "question_type": self._page.question_type if self._page else "",
-                "question": (self._page.question if self._page else "")[:500],
-                "options": [item.text for item in (self._page.options if self._page else [])][:10],
-                "last_clicked": self._last_clicked,
-                "tools": list(self._tool_events[-20:]),
+            connected = time.time() - self._agent_last_seen < 10
+            return {
+                "running": self._running,
+                "state": self._state,
+                "message": self._message,
+                "progress": {
+                    "current": self._answered,
+                    "total": 0,
+                    "label": "已答题" if self._answered else "",
+                },
+                "stats": {
+                    "completed_sets": self._completed_sets,
+                    "answered": self._answered,
+                    "errors": self._errors,
+                },
+                "updated_at": self._updated_at,
+                "extra": {
+                    "connected": connected,
+                    "page_url": self._page_url,
+                    "page_title": self._page_title,
+                    "page_mode": self._page_mode,
+                    "question_type": self._question_type,
+                    "question": self._question[:500],
+                    "options": list(self._options[:10]),
+                    "last_answer": self._last_answer,
+                    "last_click": dict(self._last_click),
+                    "target_tab_id": self._target_tab_id,
+                    "auto_submit": bool(self.ctx.settings.get("auto_submit", False)),
+                },
             }
-        state["extra"] = {**(state.get("extra") or {}), **extra}
-        state["stats"] = {
-            "answered": int((state.get("stats") or {}).get("answered", 0)),
-            "errors": int((state.get("stats") or {}).get("errors", 0)),
-        }
-        return state
 
     def actions(self) -> list[dict[str, Any]]:
-        return []
+        return [{"id": "read", "label": "读取当前页", "style": "default"}]
 
-    # -- worker ------------------------------------------------------------
-    def _loop(self, stop_event: threading.Event) -> None:
-        try:
-            serial = str(self.ctx.settings.get("device_serial", "") or "") or None
-            device = self.ctx.adb.connect(serial)
-            width, height = device.screen_size()
+    def invoke(self, action: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        if action == "read":
             with self._lock:
-                self._device = device.serial
-                self._screen = (width, height)
-            self.runner.set_extra(device=device.serial, screen=f"{width}x{height}")
-            self.ctx.log("info", f"已连接设备 {device.serial}（{width}x{height}）")
+                if not self._active:
+                    return {"ok": False, "message": "请先开始，并确保智慧树网页已连接"}
+                self._message = "已请求读取当前页面"
+                self._touch()
+            return {"ok": True, "message": "页面 Agent 将在下次心跳时更新页面状态"}
+        raise ModuleError(f"未知动作：{action}")
 
-            agent = AnswerAgent(
-                self.ctx.require("llm.chat"),
-                system_prompt=SYSTEM_PROMPT,
-                max_tool_rounds=int(self.ctx.settings.get("max_tool_rounds", 30) or 30),
-                temperature=float(self.ctx.settings.get("temperature", 0.0) or 0.0),
-                timeout=float(self.ctx.settings.get("answer_timeout", 300) or 300),
-                on_event=self._on_tool_event,
-            )
-            self._register_tools(agent, device, width, height, stop_event)
-            self.runner.set_message("已连接设备，AI 开始答题")
-            final = agent.run("开始答题。请先调用 read_page 查看当前页面，然后作答。")
-            if stop_event.is_set():
-                self.runner.set_message("已停止")
-            elif self._submit_detected:
-                self.runner.set_message("已到提交/交卷页，未点击；请手动完成", state="waiting")
-            elif self._finish_reason:
-                self.runner.set_message(self._finish_reason)
-            else:
-                self.runner.set_message(final or "答题结束")
-        except Exception as exc:  # noqa: BLE001 - module boundary
-            self.runner.fail(f"运行失败：{exc}")
-            self.ctx.log("error", f"运行失败：{exc}")
-            try:
-                self.ctx.emit("error", {"error": str(exc)}, level="error", message=str(exc))
-            except Exception:
-                pass
-
-    def _register_tools(self, agent: AnswerAgent, device: Any, width: int, height: int,
-                        stop_event: threading.Event) -> None:
-        def read_page() -> dict[str, Any]:
-            if stop_event.is_set():
-                return {"error": "已停止"}
-            page = self._read_page(device, width, height)
-            if page is None:
-                return {"error": "当前页面无法识别"}
-            with self._lock:
-                self._page = page
-            self.runner.set_extra(
-                question_type=page.question_type,
-                question=page.question[:500],
-                options=[item.text for item in page.options][:10],
-            )
-            self.ctx.emit(
-                "question",
-                {
-                    "question_type": page.question_type,
-                    "question": page.question[:1000],
-                    "options": [item.text for item in page.options],
-                },
-                message="读取页面",
-            )
-            return {
-                "question_type": page.question_type,
-                "question": page.question,
-                "options": [item.text for item in page.options],
-                "buttons": [item.text for item in page.buttons],
-            }
-
-        def click_option(option_text: str) -> dict[str, Any]:
-            page = self._page
-            if page is None:
-                page = self._read_page(device, width, height)
-            if page is None:
-                return {"error": "当前页面无法识别"}
-            target = _match_option(page, str(option_text))
-            if target is None:
-                return {
-                    "error": f"未找到选项：{option_text}",
-                    "available": [item.text for item in page.options],
-                }
-            jitter = int(self.ctx.settings.get("click_jitter", 2) or 2)
-            device.tap(target.x, target.y, jitter=jitter)
-            with self._lock:
-                self._last_clicked = target.text
-                self._page = page
-            self.runner.add_stat("answered", 1)
-            self._sleep_random()
-            return {"ok": True, "clicked": target.text}
-
-        def click_options(option_texts: list[str]) -> dict[str, Any]:
-            clicked: list[str] = []
-            for text in option_texts or []:
-                result = click_option(str(text))
-                if not result.get("ok"):
-                    return {"ok": False, "error": result.get("error"), "clicked": clicked}
-                clicked.append(str(result.get("clicked", "")))
-            return {"ok": True, "clicked": clicked}
-
-        def click_next() -> dict[str, Any]:
-            page = self._read_page(device, width, height)
-            if page is None:
-                return {"error": "当前页面无法识别"}
-            with self._lock:
-                self._page = page
-            for button in page.buttons:
-                if any(word in button.text for word in SUBMIT_WORDS):
-                    self._submit_detected = True
-                    return {
-                        "ok": True,
-                        "button": button.text,
-                        "finished": True,
-                        "message": f"检测到“{button.text}”，未点击",
-                    }
-            for button in page.buttons:
-                if any(word in button.text for word in NEXT_WORDS):
-                    device.tap(button.x, button.y, jitter=0)
-                    self._sleep_random()
-                    return {"ok": True, "button": button.text, "finished": False}
-            return {"error": "未找到下一题或提交按钮"}
-
-        def finish(reason: str = "") -> dict[str, Any]:
-            self._finish_reason = str(reason or "AI 结束答题")
-            return {"ok": True, "message": self._finish_reason}
-
-        agent.register_tool(
-            "read_page",
-            "读取当前手机页面的题目、选项和按钮。每次操作后建议重新调用以确认状态。",
-            {"type": "object", "properties": {}, "required": []},
-            read_page,
-        )
-        agent.register_tool(
-            "click_option",
-            "点击一个选项。option_text 必须与 read_page 返回的选项文字一致。",
-            {
-                "type": "object",
-                "properties": {"option_text": {"type": "string", "description": "选项文字"}},
-                "required": ["option_text"],
-            },
-            click_option,
-        )
-        agent.register_tool(
-            "click_options",
-            "多选题一次点击多个选项。option_texts 是选项文字数组。",
-            {
-                "type": "object",
-                "properties": {
-                    "option_texts": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "要点击的选项文字列表",
-                    }
-                },
-                "required": ["option_texts"],
-            },
-            click_options,
-        )
-        agent.register_tool(
-            "click_next",
-            "点击下一题/下一步。若当前是提交/交卷页，返回 finished=true 且不点击。",
-            {"type": "object", "properties": {}, "required": []},
-            click_next,
-        )
-        agent.register_tool(
-            "finish",
-            "结束答题。所有题目完成或无法继续时调用。",
-            {
-                "type": "object",
-                "properties": {"reason": {"type": "string", "description": "结束原因"}},
-                "required": [],
-            },
-            finish,
-        )
-
-    # -- page reading ------------------------------------------------------
-    def _read_page(self, device: Any, width: int, height: int) -> PageData | None:
-        last_error = ""
-        is_target = False
-        for attempt in range(3):
-            try:
-                xml = device.dump_hierarchy(
-                    timeout=float(self.ctx.settings.get("dump_timeout", 15) or 15)
-                )
-                root = ET.fromstring(_sanitize_xml(xml))
-                if not self._reader.can_handle(root):
-                    last_error = "当前页面不是智慧树答题页"
-                    is_target = False
-                    break
-                is_target = True
-                page = self._reader.parse(root, width, height)
-                if page.question or page.options:
-                    return page
-                last_error = "没有读到题干或选项"
-            except Exception as exc:  # noqa: BLE001
-                last_error = str(exc)
-            time.sleep(0.4 + attempt * 0.3)
-        if not is_target:
-            return None
-        if bool(self.ctx.settings.get("ocr_fallback", True)):
-            try:
-                if device.current_package() != PACKAGE_NAME:
-                    return None
-            except Exception:
-                return None
-            if last_error:
-                self.ctx.log("warn", f"控件树读取失败，尝试 OCR：{last_error}")
-            try:
-                ocr_page = self._read_page_ocr(device)
-                if ocr_page is not None:
-                    return ocr_page
-            except Exception as exc:  # noqa: BLE001
-                self.ctx.log("warn", f"OCR 兜底失败：{exc}")
-        return None
-
-    def _read_page_ocr(self, device: Any) -> PageData | None:
-        ocr = self.ctx.optional("media.ocr")
-        if ocr is None:
-            return None
-        png = device.screenshot(
-            timeout=float(self.ctx.settings.get("screenshot_timeout", 20) or 20)
-        )
-        result = ocr.extract(png)
-        if not result.blocks:
-            return None
-        threshold = float(self.ctx.settings.get("ocr_min_confidence", 0.5) or 0.5)
-        page = PageData(page_type="ocr", raw_text=result.text)
-        lines: list[str] = []
-        for block in result.blocks:
-            text = block.text.strip()
-            if not text or block.confidence < threshold:
-                continue
-            lines.append(text)
-            match = OPTION_RE.match(text)
-            if match and len(match.group(2)) <= 100:
-                x1, y1, x2, y2 = block.box
-                x, y = center_of((int(x1), int(y1), int(x2), int(y2)))
-                page.options.append(Option(text=text, x=x, y=y, raw_id=match.group(1)))
-            if any(word in text for word in SUBMIT_WORDS + NEXT_WORDS):
-                x1, y1, x2, y2 = block.box
-                x, y = center_of((int(x1), int(y1), int(x2), int(y2)))
-                page.buttons.append(Button(text=text, x=x, y=y))
-        if not page.options:
-            return None
-        page.question = "\n".join(lines)
-        return page
-
-    # -- helpers -----------------------------------------------------------
-    def _on_tool_event(self, event: dict[str, Any]) -> None:
-        name = str(event.get("name", ""))
-        kind = str(event.get("type", ""))
+    def on_settings_changed(self, values: dict[str, Any]) -> None:
         with self._lock:
-            self._tool_events.append({"time": _now(), "type": kind, "name": name,
-                                      "data": event.get("result") or event.get("arguments")})
-            self._tool_events = self._tool_events[-100:]
-        if kind == "tool_call":
-            self.ctx.log("debug", f"AI 调用工具：{name}")
-        elif kind == "tool_result":
-            result = event.get("result") or {}
-            if isinstance(result, dict) and result.get("clicked"):
-                self.ctx.log("info", f"点击了：{result['clicked']}")
-            elif isinstance(result, dict) and result.get("finished"):
-                self.ctx.log("warn", f"检测到提交页：{result.get('message', '')}")
-        self.ctx.emit("tool", {"tool": name, "event": kind, "result": event.get("result")},
-                      message=f"工具 {name}")
+            if self._active:
+                self._message = "智慧树设置已更新"
+                self._touch()
 
-    def _sleep_random(self) -> None:
-        low = max(0.0, float(self.ctx.settings.get("interval_min", 0.2) or 0))
-        high = max(low, float(self.ctx.settings.get("interval_max", 0.6) or low))
-        delay = low if high <= low else low + (high - low) * 0.5
-        time.sleep(delay)
+    def handle_agent_request(self, method: str, payload: dict[str, Any]) -> Any:
+        handlers = {
+            "poll": self._poll,
+            "event": self._event,
+            "answer": self._answer,
+            "storage-load": self._storage_load,
+            "storage-save": self._storage_save,
+            "state": lambda _payload: self.status(),
+        }
+        handler = handlers.get(method)
+        if handler is None:
+            raise ModuleError(f"未知智慧树页面接口：{method}")
+        return handler(payload or {})
+
+    def _choose_target_tab(self) -> str:
+        web = self.ctx.web
+        if web is None or not getattr(web, "connected", False):
+            return ""
+        try:
+            tabs = web.list_tabs()
+        except Exception as exc:  # noqa: BLE001
+            self.ctx.log("warn", f"读取浏览器标签页失败：{exc}")
+            return ""
+        candidates = [tab for tab in tabs if self._is_wisdomtree_url(str(tab.get("url", "")))]
+        if not candidates:
+            return ""
+        active = [tab for tab in candidates if tab.get("active")]
+        chosen = active[0] if active else candidates[0]
+        tab_id = str(chosen.get("id", "") or "")
+        if tab_id:
+            try:
+                web.set_target(tab_id)
+            except Exception as exc:  # noqa: BLE001
+                self.ctx.log("warn", f"绑定智慧树标签页失败：{exc}")
+        return tab_id
+
+    @staticmethod
+    def _is_wisdomtree_url(url: str) -> bool:
+        try:
+            host = urlparse(url).hostname or ""
+        except ValueError:
+            return False
+        host = host.lower()
+        return host == "zhihuishu.com" or host.endswith(".zhihuishu.com")
+
+    def _poll(self, payload: dict[str, Any]) -> dict[str, Any]:
+        page_url = _allowed_page_url(payload.get("url"))
+        client_id = str(payload.get("client_id", "") or "")
+        tab_id = str(payload.get("__tab_id", "") or "")
+        if not client_id or len(client_id) > 100:
+            raise ModuleError("页面 Agent client_id 无效")
+        now = time.time()
+        with self._lock:
+            if self._active and self._target_tab_id and tab_id != self._target_tab_id:
+                return self._poll_response(lease=False)
+            same_tab = bool(tab_id and tab_id == self._lease_tab_id)
+            lease_expired = now - self._lease_seen > LEASE_TIMEOUT
+            if self._active and (
+                self._lease_client == client_id
+                or same_tab
+                or not self._lease_client
+                or lease_expired
+            ):
+                if payload.get("has_content") or same_tab or self._lease_client == client_id:
+                    self._lease_client = client_id
+                    self._lease_tab_id = tab_id
+                    self._lease_seen = now
+            lease = bool(self._active and self._lease_client == client_id)
+            if lease or not self._active:
+                self._agent_last_seen = now
+                self._page_url = page_url
+                self._page_title = str(payload.get("title", "") or "")[:500]
+                self._page_mode = str(payload.get("mode", "") or "")[:40]
+            if lease and self._state == "running":
+                self._message = f"已连接智慧树页面（{self._page_mode or '页面'}）"
+                self._touch()
+            return self._poll_response(lease=lease)
+
+    def _poll_response(self, *, lease: bool) -> dict[str, Any]:
+        settings = self.ctx.settings.all()
+        return {
+            "active": self._active,
+            "desired_running": self._active and lease,
+            "revision": self._revision,
+            "lease": lease,
+            "status": self._message,
+            "click": {
+                "interval_ms": int(settings.get("click_interval_ms", 1500)),
+                "jitter_ms": int(settings.get("click_jitter_ms", 500)),
+            },
+            "auto_submit": bool(settings.get("auto_submit", False)),
+            "settings": settings,
+        }
+
+    def _event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        event_type = str(payload.get("type", "") or "")
+        agent_id = str(payload.get("agent_id", "") or "")
+        if not agent_id or len(agent_id) > 100:
+            raise ModuleError("页面 Agent ID 无效")
+        tab_id = str(payload.get("__tab_id", "") or "")
+        with self._lock:
+            if (
+                event_type != "log"
+                and self._active
+                and (
+                    agent_id != self._lease_client
+                    or tab_id != self._lease_tab_id
+                    or time.time() - self._lease_seen > LEASE_TIMEOUT
+                )
+            ):
+                raise ModuleError("当前页面没有智慧树自动化控制权")
+            self._agent_last_seen = time.time()
+            if event_type == "log":
+                message = str(payload.get("message", "") or "").strip()[:1000]
+                if message:
+                    self.ctx.log(
+                        "error" if payload.get("is_error") else "info",
+                        message,
+                        page_url=self._page_url,
+                    )
+            elif event_type in {"status", "page"}:
+                status = payload.get("status", {})
+                if not isinstance(status, dict):
+                    raise ModuleError("status 必须是对象")
+                if status.get("url"):
+                    self._page_url = _allowed_page_url(status.get("url"))
+                if status.get("title"):
+                    self._page_title = str(status["title"])[:500]
+                if status.get("mode"):
+                    self._page_mode = str(status["mode"])[:40]
+                if "running" in status:
+                    self._running = bool(status.get("running")) and self._active
+                metrics = status.get("metrics") or {}
+                if isinstance(metrics, dict):
+                    self._answered = max(self._answered, _count(metrics.get("questionsAnswered")))
+                    self._completed_sets = max(
+                        self._completed_sets,
+                        _count(metrics.get("completedSets")),
+                    )
+                    self._errors = max(self._errors, _count(metrics.get("errors")))
+                self._message = str(status.get("status", "") or self._message)[:500]
+                self._state = "running" if self._running else self._state
+                self._touch()
+            elif event_type == "click":
+                label = str(payload.get("label", "") or "").strip()
+                if not label:
+                    raise ModuleError("click label 不能为空")
+                self._last_click = {
+                    "label": label[:200],
+                    "target": str(payload.get("target", "") or "")[:300],
+                    "interval_ms": _count(payload.get("interval_ms")),
+                    "time": _now(),
+                }
+                self._touch()
+                self.ctx.emit("click", self._last_click, message=f"点击：{label}")
+            elif event_type == "finished":
+                message = str(payload.get("message", "") or self._message)[:500]
+                self._active = False
+                self._running = False
+                waiting = any(word in message for word in ("提交", "等待手动", "人工"))
+                self._state = "waiting" if waiting else "idle"
+                self._message = message or "智慧树任务已完成"
+                self._revision += 1
+                self._touch()
+            elif event_type == "stopped":
+                self._active = False
+                self._running = False
+                self._state = "idle"
+                self._message = str(payload.get("message", "") or "智慧树任务已停止")[:500]
+                self._revision += 1
+                self._touch()
+            else:
+                raise ModuleError(f"不支持的 Agent 事件：{event_type}")
+        return {"ok": True}
+
+    def _answer(self, payload: dict[str, Any]) -> dict[str, Any]:
+        page_url = _allowed_page_url(payload.get("url") or self._page_url)
+        agent_id = str(payload.get("agent_id", "") or "")
+        tab_id = str(payload.get("__tab_id", "") or "")
+        question = payload.get("question")
+        if not isinstance(question, dict):
+            raise ModuleError("请求必须包含 question 对象")
+        with self._lock:
+            if (
+                not self._active
+                or not agent_id
+                or agent_id != self._lease_client
+                or tab_id != self._lease_tab_id
+                or time.time() - self._lease_seen > LEASE_TIMEOUT
+            ):
+                raise ModuleError("当前页面没有智慧树自动化控制权")
+            if self._target_tab_id and tab_id != self._target_tab_id:
+                raise ModuleError("当前标签页不是目标智慧树页面")
+            self._lease_seen = time.time()
+        prompt = _question_prompt(question)
+        llm = self.ctx.require("llm.chat")
+        timeout = float(self.ctx.settings.get("answer_timeout", 120) or 120)
+        started = time.perf_counter()
+        system = "你是严谨的课程学习助手。按题目要求作答，优先使用题目材料，不编造信息。"
+        result = llm.chat(
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=float(self.ctx.settings.get("answer_temperature", 0.2)),
+            timeout=timeout,
+        )
+        raw = str((result.message or {}).get("content") or "")
+        if not raw.strip():
+            raise ModuleError("模型服务没有返回文本答案")
+        try:
+            answers = _parse_answers(raw)
+        except ModuleError:
+            retry_prompt = (
+                prompt
+                + '\n上一次输出格式无效。请重新作答，只输出 {"answers":["答案"]} 这一种 JSON 格式。'
+            )
+            result = llm.chat(
+                [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": retry_prompt},
+                ],
+                temperature=float(self.ctx.settings.get("answer_temperature", 0.2)),
+                timeout=timeout,
+            )
+            raw = str((result.message or {}).get("content") or "")
+            answers = _parse_answers(raw)
+        with self._lock:
+            self._page_url = page_url
+            self._question_type = str(question.get("type", ""))[:40]
+            self._question = str(question.get("stem", ""))[:12000]
+            self._options = [
+                str(item.get("key", "")) + ". " + str(item.get("text", ""))
+                for item in question.get("options", [])
+                if isinstance(item, dict)
+            ][:30]
+            self._last_answer = ", ".join(answers)[:2000]
+            self._answered += 1
+            self._message = f"已生成答案：{self._question_type}"
+            self._touch()
+        self.ctx.emit(
+            "answer",
+            {
+                "question_type": self._question_type,
+                "question": self._question[:1000],
+                "answers": answers,
+                "latency_ms": round((time.perf_counter() - started) * 1000),
+            },
+            message="已生成智慧树答案",
+        )
+        return {
+            "answers": answers,
+            "latency_ms": round((time.perf_counter() - started) * 1000),
+        }
+
+    def _storage_load(self, _payload: dict[str, Any]) -> dict[str, Any]:
+        with self._storage_lock:
+            try:
+                if self._storage_path.stat().st_size > STORAGE_LIMIT:
+                    raise ModuleError("智慧树页面状态文件过大，未覆盖原文件")
+                data = json.loads(self._storage_path.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                return {"data": {}}
+            except ModuleError:
+                raise
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ModuleError(f"无法读取智慧树页面状态：{exc}") from exc
+            if (
+                not isinstance(data, dict)
+                or data.get("format") != STORAGE_FORMAT
+                or data.get("version") != STORAGE_VERSION
+                or not isinstance(data.get("data"), dict)
+                or len(data.get("data", {})) > 100
+                or any(not isinstance(key, str) or len(key) > 100 for key in data.get("data", {}))
+            ):
+                raise ModuleError("智慧树页面状态格式未知或已损坏，未覆盖原文件")
+            return {"data": data["data"]}
+
+    def _storage_save(self, payload: dict[str, Any]) -> dict[str, Any]:
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            raise ModuleError("页面状态 data 必须是对象")
+        if len(data) > 100 or any(not isinstance(key, str) or len(key) > 100 for key in data):
+            raise ModuleError("页面状态字段过多或键名无效")
+        agent_id = str(payload.get("agent_id", "") or "")
+        tab_id = str(payload.get("__tab_id", "") or "")
+        with self._lock:
+            if self._active and (
+                agent_id != self._lease_client
+                or tab_id != self._lease_tab_id
+                or time.time() - self._lease_seen > LEASE_TIMEOUT
+            ):
+                raise ModuleError("当前页面没有智慧树自动化控制权")
+        try:
+            encoded = json.dumps(
+                {
+                    "format": STORAGE_FORMAT,
+                    "version": STORAGE_VERSION,
+                    "data": data,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        except (TypeError, ValueError) as exc:
+            raise ModuleError(f"页面状态不能序列化：{exc}") from exc
+        if len(encoded.encode("utf-8")) > STORAGE_LIMIT:
+            raise ModuleError("页面状态过大")
+        with self._storage_lock:
+            temp_path = self._storage_path.with_name(
+                f"{self._storage_path.name}.{uuid.uuid4().hex}.tmp"
+            )
+            try:
+                self._storage_path.parent.mkdir(parents=True, exist_ok=True)
+                temp_path.write_text(encoded, encoding="utf-8")
+                os.replace(temp_path, self._storage_path)
+            except OSError as exc:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except OSError:
+                    self.ctx.log("warn", f"清理智慧树临时状态文件失败：{temp_path}")
+                raise ModuleError(f"无法保存智慧树页面状态：{exc}") from exc
+        return {"saved": True}
+
+    def _touch(self) -> None:
+        self._updated_at = _now()
 
 
-def _match_option(page: PageData, text: str) -> Option | None:
-    target = text.strip()
-    for option in page.options:
-        if option.text.strip() == target:
-            return option
-    for option in page.options:
-        if target in option.text or option.text in target:
-            return option
-    return None
+def _count(value: Any) -> int:
+    if isinstance(value, bool):
+        return 0
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
 
 
 def setup(api: ModuleContext) -> None:

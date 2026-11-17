@@ -19,6 +19,12 @@ def test_portable_paths(tmp_path: Path) -> None:
     assert paths.web_dir == tmp_path / "web"
 
 
+def test_default_model_download_directory_is_in_project(tmp_path: Path) -> None:
+    paths = build_paths(repo=tmp_path)
+
+    assert paths.default_model_download_dir == tmp_path / "models"
+
+
 def test_non_portable_paths_have_expected_names() -> None:
     paths = build_paths(portable=False)
     assert paths.settings_file.name == "settings.json"

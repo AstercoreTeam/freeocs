@@ -1,43 +1,30 @@
 # 智慧树模块
 
-Android 版智慧树答题：通过 ADB 读取 `uiautomator` 控件树，由大模型 Function Calling 决定点击哪个选项。
+智慧树通过浏览器扩展连接已登录的智慧树网页，由页面 Agent 读取课程和题目、执行页面操作，Python 后端复用 FreeOCS 配置的文本模型生成答案。
 
 ## 使用前
 
-1. 手机开启开发者选项和 USB 调试，连接电脑并授权。
-2. 在设置 → 手机自动化中确认 adb 路径/设备（或留空自动选择唯一设备）。
-3. 配置全局文本模型，模型需支持 function calling。
-4. 打开智慧树测验页面。
+1. 在 FreeOCS 的“设置 → 大模型”中配置文本模型。
+2. 在“操作指南 → 浏览器扩展”中安装并启用 FreeOCS 扩展。
+3. 使用该浏览器登录智慧树并打开课程或测验页面。
+4. 在“应用与插件”中启动智慧树模块；页面 Agent 会连接当前智慧树标签页。
 
-## 使用
+## 能力
 
-在“应用与插件”中打开智慧树，点“开始”。AI 会：
+- 按课程目录处理可用章节，并读取单选、多选、判断、填空及简答题。
+- 通过 FreeOCS 的 `llm.chat` 能力生成答案；无需单独配置模型密钥。
+- 页面状态保存在 FreeOCS 的模块数据目录中，以便在智慧树子域之间导航后恢复进度。
+- 模块面板显示页面连接、运行状态、题目和最近操作。
 
-1. `read_page` 读取题型、题干、选项、按钮。
-2. `click_option` / `click_options` 点击选项。
-3. `click_next` 进入下一题。
-4. 检测到提交/交卷按钮时返回 `finished=true`，**不点击**。
+## 提交设置
 
-## 安全
+“自动提交作业”默认关闭。关闭时，模块会在提交页停止，等待人工核对和提交。开启后，页面 Agent 会尝试执行提交及确认操作；请仅在明确需要时启用。
 
-- 不点击提交、交卷、完成、结束等按钮。
-- 到交卷页状态变为“等待手动操作”，请人工核对后交卷。
+## 安全与限制
 
-## 设置
-
-- `device_serial`：覆盖全局设备。
-- `click_jitter`：点击随机偏移。
-- `dump_timeout` / `screenshot_timeout`：ADB 超时。
-- `poll_interval` / `interval_min` / `interval_max`：操作间隔。
-- `max_tool_rounds`：防止无限工具调用。
-- `temperature`：模型温度。
-- `ocr_fallback` / `ocr_min_confidence`：控件树失败时 OCR 兜底（需要 OCR 插件）。
-
-## 限制
-
-- 控件树读不到的 WebView/游戏引擎页面，OCR 只能兜底，可能无法定位。
-- 中文输入依赖 ADBKeyboard；v1 主要面向选择题。
-- 不做风控绕过，不自动交卷。
+- 模块不会处理登录、验证码或绕过网站风控。
+- 页面结构或接口变化可能导致题目识别或导航失败；遇到错误应停止并检查页面及日志。
+- 页面 Agent 需要浏览器扩展保持连接，并且智慧树页面必须处于扩展匹配的域名下。
 
 ---
 
@@ -47,4 +34,3 @@ Copyright (C) 2026 qincnd <qincnd@qq.com>, XueZicheng <xuezicheng842@outlook.com
 
 This project is licensed under the **GNU Affero General Public License v3.0 only** (`AGPL-3.0-only`).
 See [https://spdx.org/licenses/AGPL-3.0-only.html](https://spdx.org/licenses/AGPL-3.0-only.html).
-
