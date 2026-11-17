@@ -123,7 +123,9 @@ class Application:
         """Local-first defaults when the user has not bound a capability yet."""
         preferred = {
             "media.asr": "asr_whisper",
-            "media.tts": "tts_kokoclone",
+            # KokoClone needs user-provided models/reference audio; keep the
+            # system TTS default so dubbing/reading pages work out of the box.
+            "media.tts": "tts_system",
             "media.ocr": "ocr_rapid",
         }
         current = self.settings.capability_bindings()
