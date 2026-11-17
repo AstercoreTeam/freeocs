@@ -2124,9 +2124,13 @@
       ));
     }
     if (controls.type === "dropdown") {
+      const empty = controls.dropdown?.element?.querySelector(".user-answer.empty") ||
+        controls.dropdown?.element?.querySelector(".user-answer-text")?.classList.contains("empty");
+      if (empty) return false;
       const text = (controls.dropdown?.element?.querySelector(".user-answer-text")
         ?.innerText || controls.dropdown?.element?.innerText || "").trim();
-      return Boolean(text) && !/请选择|choose|select/i.test(text);
+      // U校园 shows "点击选择" for an untouched dropdown.
+      return Boolean(text) && !/请选择|点击选择|选择|choose|select/i.test(text);
     }
     if (controls.fields?.length) {
       return controls.fields.every((field) =>
