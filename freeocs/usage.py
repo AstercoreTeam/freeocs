@@ -51,6 +51,7 @@ class UsageStore:
         self.settings = settings
         self._lock = threading.RLock()
         self._data = self._load()
+        self.call_store: Any = None
 
     # -- persistence -------------------------------------------------------
     def _empty(self) -> dict[str, Any]:
@@ -336,6 +337,9 @@ class UsageStore:
             "recent": recent,
         }
 
+    def attach_call_store(self, store: Any) -> None:
+        self.call_store = store
+
     def wrap(self, provider: Any, *, consumer: str = "") -> Any:
         if isinstance(provider, MeteredLLM):
             return provider
@@ -351,16 +355,40 @@ class MeteredLLM:
         self._consumer = consumer
 
     def chat(self, messages: Any, **kwargs: Any) -> Any:
-        self._usage.ensure_allowed()
-        result = self._provider.chat(messages, **kwargs)
-        raw = getattr(result, "raw", {}) or {}
-        model = str(raw.get("model", "") or "") if isinstance(raw, dict) else ""
-        self._usage.record(
-            getattr(result, "usage", {}) or {},
-            model=model,
-            source=self._consumer,
-        )
-        return result
+        started = time.perf_counter()
+        call_store = getattr(self._usage, "call_store", None)
+        try:
+            self._usage.ensure_allowed()
+            result = self._provider.chat(messages, **kwargs)
+            raw = getattr(result, "raw", {}) or {}
+            model = str(raw.get("model", "") or "") if isinstance(raw, dict) else ""
+            self._usage.record(
+                getattr(result, "usage", {}) or {},
+                model=model,
+                source=self._consumer,
+            )
+            if call_store is not None:
+                call_store.record(
+                    source=self._consumer,
+                    model=model,
+                    messages=messages,
+                    kwargs=kwargs,
+                    response=result,
+                    latency_ms=(time.perf_counter() - started) * 1000,
+                )
+            return result
+        except Exception as exc:
+            if call_store is not None:
+                call_store.record(
+                    source=self._consumer,
+                    model="",
+                    messages=messages,
+                    kwargs=kwargs,
+                    error=str(exc),
+                    latency_ms=(time.perf_counter() - started) * 1000,
+                    ok=False,
+                )
+            raise
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._provider, name)

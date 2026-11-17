@@ -223,3 +223,27 @@
 }
 
 .home-page-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+
+/* Token usage */
+.home-usage-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.home-usage-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-soft);
+}
+.home-usage-main strong { font-size: 20px; }
+.home-usage-label { color: var(--muted); font-size: 11px; }
+.home-usage-prices { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; color: var(--muted); font-size: 11px; }
+.home-usage-prices b { color: var(--text); font-weight: 600; }
+.home-usage-progress { height: 6px; margin-top: 10px; overflow: hidden; border-radius: 99px; background: var(--border); }
+.home-usage-progress span { display: block; height: 100%; border-radius: inherit; background: var(--primary); }
+@media (max-width: 760px) { .home-usage-grid { grid-template-columns: 1fr; } }

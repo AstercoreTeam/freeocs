@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from .ai_calls import AICallStore
 from .browser_launcher import supported_websites
 from .capabilities import CapabilityRegistry
 from .config import SettingsStore
@@ -50,6 +51,8 @@ class Application:
         setup_logging(self.paths.log_file, level)
         self.events = EventBus()
         self.usage = UsageStore(self.paths.data_dir / "usage.json", self.settings)
+        self.ai_calls = AICallStore(self.paths.data_dir / "ai-calls", self.settings)
+        self.usage.attach_call_store(self.ai_calls)
         self.registry = CapabilityRegistry()
         self.registry.set_usage(self.usage)
         self.registry.apply_bindings(self.settings.capability_bindings())

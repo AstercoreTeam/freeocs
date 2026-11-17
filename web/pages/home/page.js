@@ -150,6 +150,17 @@
         </div>
       </section>
 
+      <section class="card home-section home-usage-section">
+        <div class="home-section-head">
+          <div>
+            <h2 class="card-title">Token 消耗</h2>
+            <p class="card-subtitle">按模型返回的 usage 统计；单价与限额在设置中调整。</p>
+          </div>
+          <button class="btn btn-sm" data-action="usage-settings">设置单价/限额</button>
+        </div>
+        <div data-role="usage"></div>
+      </section>
+
       <div class="home-bottom-grid">
         <section class="card home-section">
           <div class="home-section-head">
@@ -170,6 +181,7 @@
     const siteGrid = target.querySelector("#home-site-grid");
     const flow = target.querySelector("#home-flow");
     const statusRoot = target.querySelector('[data-role="status"]');
+    const usageRoot = target.querySelector('[data-role="usage"]');
     const logsRoot = target.querySelector('[data-role="logs"]');
 
     function siteById(siteId) {
@@ -799,6 +811,46 @@
       testButton.addEventListener("click", () => void saveModel(true));
     }
 
+    function renderUsage() {
+      if (!usageRoot) return;
+      const u = home.usage || {};
+      const limit = Number(u.monthly_limit || 0);
+      const used = Number(u.month_cost || 0);
+      const remaining = Number(u.remaining || 0);
+      const progress = limit > 0 ? Math.min(100, Math.max(0, (used / limit) * 100)) : 0;
+      const prices = [
+        ["命中", u.cache_hit_price_per_million || 0],
+        ["未命中", u.cache_miss_price_per_million || 0],
+        ["输出", u.output_price_per_million || 0],
+      ];
+      usageRoot.innerHTML = `
+        <div class="home-usage-grid">
+          <div class="home-usage-main">
+            <span class="home-usage-label">本月 Token</span>
+            <strong>${Number(u.month_tokens || 0).toLocaleString()}</strong>
+            <span class="form-help">${Number(u.month_calls || 0)} 次调用</span>
+          </div>
+          <div class="home-usage-main">
+            <span class="home-usage-label">本月消费</span>
+            <strong>¥${used.toFixed(3)}</strong>
+            <span class="form-help">累计 ¥${Number(u.total_cost || 0).toFixed(3)}</span>
+          </div>
+          <div class="home-usage-main">
+            <span class="home-usage-label">月度限额</span>
+            <strong>${limit > 0 ? `¥${limit.toFixed(2)}` : "未设置"}</strong>
+            <span class="form-help">${limit > 0 ? `剩余 ¥${remaining.toFixed(2)}` : "达到限额后阻止新调用"}</span>
+          </div>
+          <div class="home-usage-prices">
+            ${prices.map(([label, value]) =>
+              `<span>${label} <b>¥${Number(value).toFixed(4)}</b>/百万</span>`
+            ).join("")}
+          </div>
+        </div>
+        <div class="home-usage-progress" title="${limit > 0 ? `${progress.toFixed(1)}%` : "未设置限额"}">
+          <span style="width:${progress}%"></span>
+        </div>`;
+    }
+
     async function refreshHome() {
       try {
         home = await API.must("get_home");
@@ -811,6 +863,7 @@
         }
         updateSiteStates();
         renderStatusCards();
+        renderUsage();
       } catch (error) {
         console.warn("刷新首页状态失败", error);
       }
@@ -827,6 +880,7 @@
     }
 
     target.querySelector('[data-action="guide"]').addEventListener("click", () => App.navigate("guide"));
+    target.querySelector('[data-action="usage-settings"]').addEventListener("click", () => App.navigate("settings", { section: "usage" }));
     target.querySelector('[data-action="refresh"]').addEventListener("click", () => void refreshHome());
     target.querySelector('[data-action="logs"]').addEventListener("click", () => App.navigate("logs"));
 
@@ -834,6 +888,7 @@
     renderFlow();
     setupLlm();
     renderStatusCards();
+    renderUsage();
     renderLogs();
     document.addEventListener("focs:events", onEvents);
 

@@ -31,6 +31,7 @@ NAV = [
     {"id": "guide", "title": "操作指南"},
     {"id": "settings", "title": "设置"},
     {"id": "logs", "title": "日志"},
+    {"id": "ai-calls", "title": "AI 调用"},
 ]
 
 
@@ -500,6 +501,31 @@ class UiApi:
             return self._fail(exc)
 
     # -- events / diagnostics ---------------------------------------------
+    def get_ai_calls(self, limit: int = 200) -> dict[str, Any]:
+        try:
+            calls = self.app.ai_calls.list(int(limit or 200))
+            return self._ok(
+                calls=calls,
+                stats=self.app.ai_calls.stats(limit=max(500, int(limit or 200))),
+                folder=str(self.app.ai_calls.root),
+            )
+        except Exception as exc:  # noqa: BLE001
+            return self._fail(exc)
+
+    def open_ai_calls(self) -> dict[str, Any]:
+        try:
+            folder = self.app.ai_calls.root
+            folder.mkdir(parents=True, exist_ok=True)
+            if sys.platform == "win32":
+                os.startfile(str(folder))  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(folder)])
+            else:
+                subprocess.Popen(["xdg-open", str(folder)])
+            return self._ok(folder=str(folder))
+        except Exception as exc:  # noqa: BLE001
+            return self._fail(exc)
+
     def get_events(self, after_seq: int = 0, limit: int = 200) -> dict[str, Any]:
         try:
             data = self.app.events.since(int(after_seq or 0), limit=int(limit or 200))
