@@ -28,7 +28,7 @@ v1 内置包建议：
 | `tts_system` | plugin | `media.tts` | — |
 | `tts_openai` | plugin | `media.tts` | — |
 | `ucampus` | module | — | `llm.chat`, `media.asr`, `media.tts`, `web.bridge` |
-| `wisdomtree` | module | — | `llm.chat`, `android.adb`（OCR 可选） |
+| `wisdomtree` | module | — | `llm.chat`, `web.bridge` |
 
 ## 3. zip 目录结构
 

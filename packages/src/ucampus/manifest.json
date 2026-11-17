@@ -3,7 +3,7 @@
   "api_version": 1,
   "id": "ucampus",
   "name": "U校园",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "U校园网页自动学习：识别题目、听力转写、作答与回填；遇到提交/发布时停止。",
   "author": "FreeOCS",
@@ -106,6 +106,13 @@
               "label": "WAV"
             }
           ]
+        },
+        {
+          "key": "auto_record_speaking",
+          "type": "boolean",
+          "label": "自动完成朗读/角色扮演录音",
+          "default": true,
+          "help": "使用语音合成模拟麦克风完成朗读评分与角色扮演；仍会在提交前停止，等待人工确认。"
         },
         {
           "key": "answer_timeout",

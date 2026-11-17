@@ -31,6 +31,15 @@ uv pip install --python .venv/bin/python -r requirements.txt
 uv pip install --python .venv/bin/python -e ".[dev]"
 ```
 
+Windows（PowerShell）：
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+```
+
+Windows 桌面运行需要 WebView2 Runtime（Windows 10/11 通常已安装）。
+
 Linux 桌面还需要：
 
 ```bash
@@ -43,6 +52,13 @@ sudo apt install gir1.2-gtk-3.0 gir1.2-webkit2-4.1 ffmpeg
 ```bash
 # 源码包模式（推荐开发时使用）
 FREEOCS_PACKAGES=source .venv/bin/python main.py --dev
+```
+
+Windows（PowerShell）：
+
+```powershell
+$env:FREEOCS_PACKAGES = "source"
+.\.venv\Scripts\python.exe main.py --dev
 ```
 
 首次启动会显示 AGPL-3.0-only 协议确认窗口。

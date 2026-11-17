@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import pytest
 
+from freeocs.app import Application
 from freeocs.capabilities import CapabilityRegistry
+from freeocs.config import SettingsStore
 from freeocs.sdk import CapabilityMissing
 
 
@@ -17,6 +19,23 @@ class FakeProvider:
 
     def chat(self, *args, **kwargs):
         return self.name
+
+
+def test_local_first_tts_default_prefers_kokoclone(tmp_path) -> None:
+    registry = CapabilityRegistry()
+    registry.register_provider("tts_system", "media.tts", FakeProvider("system"))
+    registry.register_provider("tts_kokoclone", "media.tts", FakeProvider("clone"))
+    registry.register_provider("asr_whisper", "media.asr", FakeProvider("asr"))
+    registry.register_provider("ocr_rapid", "media.ocr", FakeProvider("ocr"))
+    app = Application.__new__(Application)
+    app.settings = SettingsStore(tmp_path / "settings.json")
+    app.registry = registry
+
+    Application._apply_preferred_capabilities(app)
+
+    assert app.registry.binding("media.tts") == "tts_kokoclone"
+    assert app.registry.binding("media.asr") == "asr_whisper"
+    assert app.registry.binding("media.ocr") == "ocr_rapid"
 
 
 def test_binding_and_fallback() -> None:

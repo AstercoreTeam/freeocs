@@ -113,6 +113,7 @@ CORE_SECTIONS: list[dict[str, Any]] = [
                 options=[
                     {"value": "home", "label": "首页"},
                     {"value": "apps", "label": "应用"},
+                    {"value": "models", "label": "模型下载"},
                     {"value": "guide", "label": "操作指南"},
                 ],
             ),
@@ -137,6 +138,17 @@ CORE_SECTIONS: list[dict[str, Any]] = [
         "group": "core",
         "order": 20,
         "fields": [
+            field(
+                "provider_mode",
+                "连接方式",
+                "select",
+                "cloud",
+                options=[
+                    {"value": "cloud", "label": "云端大模型"},
+                    {"value": "ollama", "label": "本地 Ollama"},
+                ],
+                help="本地 Ollama 默认使用 http://localhost:11434/v1。",
+            ),
             field(
                 "base_url",
                 "API 地址",
@@ -563,11 +575,18 @@ class SettingsStore:
 
     # -- summary -----------------------------------------------------------
     def summary(self) -> dict[str, Any]:
+        llm_mode = self.core_get("llm", "provider_mode", "cloud")
+        llm_base_url = self.core_get("llm", "base_url", "")
+        llm_model = self.core_get("llm", "model", "")
+        llm_api_key = self.core_get("llm", "api_key", "")
         return {
             "llm": {
-                "configured": bool(self.core_get("llm", "api_key")),
-                "base_url": self.core_get("llm", "base_url"),
-                "model": self.core_get("llm", "model"),
+                "configured": bool(
+                    llm_base_url and llm_model and (llm_mode == "ollama" or llm_api_key)
+                ),
+                "provider_mode": llm_mode,
+                "base_url": llm_base_url,
+                "model": llm_model,
             },
             "bridge": {
                 "port": self.core_get("bridge", "port", 8765),

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
 import subprocess
 import sys
 import time
@@ -17,6 +16,9 @@ import webbrowser
 from pathlib import Path
 from typing import Any
 
+from . import voice_samples
+from .browser_launcher import find_browsers
+from .browser_launcher import launch_supported_website as launch_website
 from .packages import validate_archive
 from .sdk import ModuleError, SettingsError
 
@@ -25,6 +27,7 @@ logger = logging.getLogger("freeocs.api")
 NAV = [
     {"id": "home", "title": "首页"},
     {"id": "apps", "title": "应用与插件"},
+    {"id": "models", "title": "模型下载"},
     {"id": "guide", "title": "操作指南"},
     {"id": "settings", "title": "设置"},
     {"id": "logs", "title": "日志"},
@@ -105,9 +108,112 @@ class UiApi:
         except Exception as exc:  # noqa: BLE001
             return self._fail(exc)
 
+    def launch_supported_website(self, site_id: str) -> dict[str, Any]:
+        try:
+            result = launch_website(
+                str(site_id),
+                extension_dir=self.app.paths.extension_dir / "chromium",
+                profile_dir=self.app.paths.data_dir / "browser-profiles" / "chromium",
+            )
+            logger.info("已打开 %s（%s）", result["site"], result["browser"])
+            return self._ok(**result)
+        except Exception as exc:  # noqa: BLE001
+            return self._fail(exc)
+
     def get_usage(self) -> dict[str, Any]:
         try:
             return self._ok(usage=self.app.usage.summary())
+        except Exception as exc:  # noqa: BLE001
+            return self._fail(exc)
+
+    def get_model_download_catalog(self) -> dict[str, Any]:
+        try:
+            manager = self.app.model_downloads
+            return self._ok(
+                models=manager.catalog(),
+                default_dir=str(manager.default_dir),
+                download=manager.status(),
+            )
+        except Exception as exc:  # noqa: BLE001
+            return self._fail(exc)
+
+    def start_model_download(self, model_id: str, target_dir: str) -> dict[str, Any]:
+        try:
+            return self._ok(download=self.app.model_downloads.start(str(model_id), str(target_dir)))
+        except Exception as exc:  # noqa: BLE001
+            return self._fail(exc)
+
+    def get_model_download_status(self) -> dict[str, Any]:
+        try:
+            return self._ok(download=self.app.model_downloads.status())
+        except Exception as exc:  # noqa: BLE001
+            return self._fail(exc)
+
+    def cancel_model_download(self) -> dict[str, Any]:
+        try:
+            return self._ok(download=self.app.model_downloads.cancel())
+        except Exception as exc:  # noqa: BLE001
+            return self._fail(exc)
+
+    # -- voice samples -----------------------------------------------------
+    def _voice_sample(self) -> dict[str, object]:
+        values = self.app.settings.package_values("tts_kokoclone")
+        return voice_samples.describe_sample(values.get("reference_audio", ""))
+
+    def _voice_sample_root(self) -> Path:
+        return self.app.paths.data_dir / "voice-samples"
+
+    def _store_voice_sample(self, path: Path) -> dict[str, Any]:
+        saved = self.save_settings("tts_kokoclone", {"reference_audio": str(path)})
+        if not saved.get("ok"):
+            return saved
+        return self._ok(sample=voice_samples.describe_sample(path))
+
+    def get_voice_sample(self) -> dict[str, Any]:
+        try:
+            return self._ok(sample=self._voice_sample())
+        except Exception as exc:  # noqa: BLE001
+            return self._fail(exc)
+
+    def import_voice_sample(self) -> dict[str, Any]:
+        try:
+            import webview
+
+            chosen = self._choose(
+                webview.OPEN_DIALOG,
+                file_types=(
+                    "音频文件 (*.wav;*.mp3;*.m4a;*.ogg;*.webm;*.flac)",
+                    "所有文件 (*.*)",
+                ),
+            )
+            if chosen.get("cancelled"):
+                return self._ok(cancelled=True, sample=self._voice_sample())
+            path = voice_samples.import_voice_sample(
+                str(chosen["path"]),
+                self._voice_sample_root(),
+            )
+            return self._store_voice_sample(path)
+        except Exception as exc:  # noqa: BLE001
+            return self._fail(exc)
+
+    def save_voice_sample(self, extension: str, data_base64: str) -> dict[str, Any]:
+        try:
+            data = voice_samples.decode_base64(str(data_base64 or ""))
+            path = voice_samples.save_voice_sample(
+                data,
+                str(extension or ""),
+                self._voice_sample_root(),
+            )
+            return self._store_voice_sample(path)
+        except Exception as exc:  # noqa: BLE001
+            return self._fail(exc)
+
+    def clear_voice_sample(self) -> dict[str, Any]:
+        try:
+            saved = self.save_settings("tts_kokoclone", {"reference_audio": ""})
+            if not saved.get("ok"):
+                return saved
+            return self._ok(sample=voice_samples.describe_sample(""))
         except Exception as exc:  # noqa: BLE001
             return self._fail(exc)
 
@@ -236,9 +342,7 @@ class UiApi:
         try:
             if self.app.modules is None:
                 raise ModuleError("模块系统未初始化")
-            return self._ok(
-                **self.app.modules.invoke(str(module_id), str(action), payload or {})
-            )
+            return self._ok(**self.app.modules.invoke(str(module_id), str(action), payload or {}))
         except Exception as exc:  # noqa: BLE001
             return self._fail(exc)
 
@@ -310,6 +414,8 @@ class UiApi:
             if section_id == "capabilities":
                 saved = self.app.settings.save_section("capabilities", values)
                 for capability in self.app.registry.capabilities():
+                    if capability not in values:
+                        continue
                     self.app.registry.set_binding(capability, values.get(capability) or None)
                 return self._ok(saved=saved)
             saved = self.app.settings.save_section(str(section_id), values)
@@ -378,18 +484,9 @@ class UiApi:
 
     def get_guide_data(self) -> dict[str, Any]:
         app = self.app
-        browsers = []
-        for name, executable in (
-            ("Chrome", "google-chrome"),
-            ("Chromium", "chromium"),
-            ("Chromium", "chromium-browser"),
-            ("Edge", "microsoft-edge"),
-            ("Brave", "brave-browser"),
-            ("Firefox", "firefox"),
-        ):
-            path = shutil.which(executable)
-            if path and not any(item["name"] == name for item in browsers):
-                browsers.append({"name": name, "path": path})
+        browsers = [
+            {"name": browser.name, "path": browser.executable} for browser in find_browsers()
+        ]
         return self._ok(
             extension_dir=str(app.paths.extension_dir),
             chromium_dir=str(app.paths.extension_dir / "chromium"),
@@ -428,12 +525,20 @@ class UiApi:
         except Exception as exc:  # noqa: BLE001
             return self._fail(exc)
 
-    def _choose(self, dialog: Any) -> dict[str, Any]:
+    def _choose(
+        self,
+        dialog: Any,
+        *,
+        file_types: tuple[str, ...] | None = None,
+    ) -> dict[str, Any]:
         import webview
 
         if not webview.windows:
             raise RuntimeError("窗口尚未就绪")
-        result = webview.windows[0].create_file_dialog(dialog)
+        options: dict[str, Any] = {}
+        if file_types:
+            options["file_types"] = file_types
+        result = webview.windows[0].create_file_dialog(dialog, **options)
         if not result:
             return self._ok(cancelled=True)
         path = result[0] if isinstance(result, (list, tuple)) else result

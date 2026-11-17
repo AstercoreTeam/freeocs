@@ -80,10 +80,7 @@ class UcampusModule(Module):
         except Exception as exc:  # noqa: BLE001
             self.ctx.log("warn", f"读取浏览器标签页失败：{exc}")
             return ""
-        candidates = [
-            tab for tab in tabs
-            if "unipus.cn" in str(tab.get("url", ""))
-        ]
+        candidates = [tab for tab in tabs if "unipus.cn" in str(tab.get("url", ""))]
         if not candidates:
             return ""
         active = [tab for tab in candidates if tab.get("active")]
@@ -109,7 +106,8 @@ class UcampusModule(Module):
             self._state = "running"
             self._message = (
                 f"正在连接 U校园标签页（{self._target_tab_id}）…"
-                if self._target_tab_id else "正在连接 U校园页面…"
+                if self._target_tab_id
+                else "正在连接 U校园页面…"
             )
             self._completed = 0
             self._answered = 0
@@ -299,6 +297,7 @@ class UcampusModule(Module):
                 "command": command,
                 "status": self._message,
                 "completed": self._completed,
+                "settings": self.ctx.settings.all(),
             }
         return response
 
@@ -386,23 +385,48 @@ class UcampusModule(Module):
         )
         llm = self.ctx.require("llm.chat")
         timeout = float(self.ctx.settings.get("answer_timeout", 300) or 300)
-        result = llm.chat(
-            [
+
+        def ask(user_prompt: str) -> tuple[str, str, str]:
+            reply = llm.chat(
+                [
+                    {
+                        "role": "system",
+                        "content": "你是英语学习助手。认真阅读题目和材料，给出准确、简洁的答案。",
+                    },
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.2,
+                timeout=timeout,
+            )
+            text = str((reply.message or {}).get("content") or "")
+            parsed, note = parse_answer(text, question_type, blank_count)
+            return parsed, note, text
+
+        answer, explanation, raw = ask(prompt)
+        if self._needs_answer_retry(answer, question_type, blank_count):
+            strict_note = (
+                f"上一次输出不符合要求。页面恰好有 {blank_count} 个空，"
+                f"请只输出 {blank_count} 行答案，每行一个空；不要编号，不要 JSON，不要解释。"
+                if question_type == "blanks"
+                else "上一次输出无法解析。请只返回要求的 JSON 对象。"
+            )
+            retry_prompt = build_prompt(
                 {
-                    "role": "system",
-                    "content": "你是英语学习助手。认真阅读题目和材料，给出准确、简洁的答案。",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.2,
-            timeout=timeout,
-        )
-        raw = str((result.message or {}).get("content") or "")
-        if not raw.strip():
-            raise ModuleError("模型返回为空")
-        answer, explanation = parse_answer(raw, question_type, blank_count)
-        if not answer.strip():
-            raise ModuleError("模型未返回可用答案")
+                    "question": question,
+                    "options": options,
+                    "question_type": question_type,
+                    "blank_count": blank_count,
+                    "context": f"{context}\n\n{strict_note}".strip(),
+                }
+            )
+            answer, explanation, raw = ask(retry_prompt)
+            if self._needs_answer_retry(answer, question_type, blank_count):
+                if question_type == "blanks" and blank_count > 0:
+                    got = len([line for line in answer.splitlines() if line.strip()])
+                    raise ModuleError(
+                        f"模型返回 {got} 个填空答案，页面有 {blank_count} 个空，已停止并保留页面。"
+                    )
+                raise ModuleError("模型未返回可用答案")
         with self._lock:
             self._last_answer = answer[:2000]
             self._question_type = question_type[:40]
@@ -412,9 +436,16 @@ class UcampusModule(Module):
             "answer": answer,
             "explanation": explanation,
             "raw": raw,
-            "model": str((result.message or {}).get("model", "") or ""),
             "question_type": question_type,
         }
+
+    @staticmethod
+    def _needs_answer_retry(answer: str, question_type: str, blank_count: int) -> bool:
+        if not answer.strip():
+            return True
+        if question_type == "blanks" and blank_count > 0:
+            return len([line for line in answer.splitlines() if line.strip()]) != blank_count
+        return False
 
     def _answer_page(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Save an unsupported page and ask the model for a small action plan."""
@@ -491,10 +522,16 @@ class UcampusModule(Module):
             }
 
     @staticmethod
-    def _validate_page_actions(raw_actions: Any, elements: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _validate_page_actions(
+        raw_actions: Any, elements: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         if not isinstance(raw_actions, list):
             return []
-        by_index = {int(item.get("index")): item for item in elements if str(item.get("index", "")).isdigit()}
+        by_index = {
+            int(item.get("index")): item
+            for item in elements
+            if str(item.get("index", "")).isdigit()
+        }
         submit_words = ("提交", "交卷", "发布", "评分提交", "确定提交", "保存并提交")
         actions: list[dict[str, Any]] = []
         for item in raw_actions[:6]:
@@ -584,7 +621,10 @@ class UcampusModule(Module):
             raise ModuleError("音频过大")
         audio = base64.b64decode(encoded, validate=True)
         filename = str(payload.get("filename", "audio.wav") or "audio.wav")
-        language = str(payload.get("language", "") or self.ctx.settings.get("asr_language", "") or "") or None
+        language = (
+            str(payload.get("language", "") or self.ctx.settings.get("asr_language", "") or "")
+            or None
+        )
         asr = self.ctx.require("media.asr")
         transcript = asr.transcribe(audio, filename=filename, language=language)
         return {
@@ -629,9 +669,13 @@ class UcampusModule(Module):
         text = str(payload.get("text", "") or "").strip()
         if not text:
             raise ModuleError("TTS 文本为空")
-        voice = str(payload.get("voice", "") or self.ctx.settings.get("tts_voice", "") or "") or None
+        voice = (
+            str(payload.get("voice", "") or self.ctx.settings.get("tts_voice", "") or "") or None
+        )
         language = str(payload.get("language", "") or "") or None
-        output_format = str(payload.get("output_format", "") or self.ctx.settings.get("tts_format", "mp3") or "mp3")
+        output_format = str(
+            payload.get("output_format", "") or self.ctx.settings.get("tts_format", "mp3") or "mp3"
+        )
         tts = self.ctx.require("media.tts")
         result = tts.synthesize(text, voice=voice, language=language, output_format=output_format)
         if len(result.data) > 20_000_000:

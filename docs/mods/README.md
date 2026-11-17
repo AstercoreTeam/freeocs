@@ -15,7 +15,7 @@
 | 平台 | 接入方式 | 模块包 | 实现文档 |
 | --- | --- | --- | --- |
 | U校园 | 浏览器扩展 + 本地中继 + 页面 Agent | `packages/src/ucampus` | [ucampus/README.md](ucampus/README.md) |
-| 智慧树 | ADB + `uiautomator dump` + Function Calling | `packages/src/wisdomtree` | [wisdomtree/README.md](wisdomtree/README.md) |
+| 智慧树 | 浏览器扩展 + 本地中继 + 页面 Agent | `packages/src/wisdomtree` | [wisdomtree/README.md](wisdomtree/README.md) |
 
 ## 文档约定
 

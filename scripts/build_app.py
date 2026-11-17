@@ -33,12 +33,17 @@ def build(onefile: bool, clean: bool, name: str) -> Path:
         "--name",
         name,
         "--onefile" if onefile else "--onedir",
-        "--hidden-import=webview.platforms.gtk",
-        "--hidden-import=gi",
-        "--hidden-import=gi.repository.Gtk",
-        "--hidden-import=gi.repository.WebKit2",
         "--collect-submodules=webview",
     ]
+    if sys.platform.startswith("linux"):
+        cmd.extend(
+            [
+                "--hidden-import=webview.platforms.gtk",
+                "--hidden-import=gi",
+                "--hidden-import=gi.repository.Gtk",
+                "--hidden-import=gi.repository.WebKit2",
+            ]
+        )
     if clean:
         cmd.append("--clean")
     # Optional runtime dependencies are loaded dynamically by plugins.  Collect
@@ -123,7 +128,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-clean", action="store_true", help="不清理 PyInstaller 缓存")
     parser.add_argument("--name", default="FreeOCS")
     parser.add_argument("--tar", action="store_true", help="Linux 下额外生成 tar.gz")
+    platform_group = parser.add_mutually_exclusive_group()
+    platform_group.add_argument("--linux", action="store_true", help="在 Linux 上构建")
+    platform_group.add_argument("--windows", action="store_true", help="在 Windows 上构建")
     args = parser.parse_args(argv)
+    requested_platform = "windows" if args.windows else "linux" if args.linux else None
+    current_platform = "windows" if sys.platform == "win32" else "linux" if sys.platform.startswith("linux") else None
+    if requested_platform and requested_platform != current_platform:
+        parser.error(f"PyInstaller 不支持跨平台构建；请在 {requested_platform} 主机上运行")
     output = build(onefile=args.onefile, clean=not args.no_clean, name=args.name)
     if args.tar and sys.platform != "win32" and output.suffix != ".exe":
         if output.is_dir():

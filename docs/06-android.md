@@ -1,8 +1,10 @@
 # 06 Android / ADB 传输层
 
+> 现状：FreeOCS 保留通用 ADB 传输能力，但当前内置模块不使用 Android 自动化。智慧树已迁移到浏览器扩展，见[智慧树模块实现](mods/wisdomtree/README.md)。以下内容是供未来 Android 模块参考的传输设计，不代表智慧树当前实现。
+
 ## 1. 目标
 
-手机模块通过 ADB 完成：
+Android 模块可通过 ADB 完成：
 
 1. 发现并选择一台已授权的 Android 设备。
 2. 读取当前页面的控件树（`uiautomator dump`），解析题型、题干、选项、按钮及精确坐标。
@@ -155,7 +157,7 @@ adb shell am broadcast -a ADB_INPUT_TEXT --es msg '中文内容'
 adb shell am broadcast -a ADB_INPUT_B64 --es msg '<base64>'
 ```
 
-v1 智慧树以选择题为主，不依赖中文输入；填空类题目如遇中文输入失败，停止并提示。
+AndroidKeyboard 可用于需要输入中文的模块；该能力目前不是智慧树模块的实现路径。
 
 ## 4. 控件树解析
 
@@ -214,7 +216,7 @@ class PageReader:
 模块内部维护 registry：
 
 ```python
-readers = [WisdomTreeReader()]
+readers = [ExampleReader()]
 reader = next((r for r in readers if r.can_handle(root)), None)
 ```
 
@@ -228,20 +230,13 @@ reader = next((r for r in readers if r.can_handle(root)), None)
 - 题号（`1/10`）单独过滤。
 - 题目签名用于去重：题干 + 题型 + 选项 + 按钮；页面无变化时避免重复点击。
 
-### 4.4 智慧树 Reader 要点
+### 4.4 模块专用解析器
 
-包名：`com.able.wisdomtree`。
+解析器由具体 Android 模块实现。当前智慧树模块面向网页，不提供 Android Reader；未来新增 Android 模块时，应基于其目标应用的控件树编写独立 Reader。
 
-- `can_handle`：任一节点 `package == com.able.wisdomtree`。
-- 题型词：`判断题`、`单选题`、`多选题`、`不定项`。
-- 按钮词：`下一题`、`上一题`、`提交`、`交卷`、`完成`、`答题卡`、`继续`。
-- 选项：遍历所有文本节点（不只 clickable），匹配字母前缀；排除按钮/题型/题号/过长文本。
-- 题干：选项上方、`class == android.widget.TextView`、非选项/题型/按钮/题号，按 y 排序。
-- 多选/不定项：需要返回多个选项；Agent 的 `click_option` 可被多次调用，或新增 `click_options` 工具。
+## 5. Agent 设计参考
 
-## 5. 答题 Agent
-
-智慧树使用 Function Calling Agent：
+本节是未来 Android 模块的设计参考，不对应当前内置智慧树模块；智慧树使用浏览器页面 Agent 和普通 `llm.chat` 调用。
 
 ### 5.1 工具
 
@@ -280,7 +275,7 @@ tool: ok, finished=false
 - 不点击“答题卡”等可能触发提交的控件。
 - 记录“等待手动提交”状态，模块 `running=false`。
 
-## 6. OCR 兜底
+## 6. OCR 兜底参考
 
 ### 6.1 触发条件
 
@@ -314,7 +309,7 @@ screenshot (PNG)
 
 未来可增加 `media.vision` 能力，直接把截图交给多模态模型返回选项/坐标；v1 不做。
 
-## 7. 线程、超时与停止
+## 7. 线程、超时与停止参考
 
 - 模块工作线程执行 Agent 循环；每步检查 `stop_event`。
 - 单步超时：
@@ -325,7 +320,7 @@ screenshot (PNG)
   - 不再发起新的点击。
   - 状态置为 `idle`，消息“已停止”。
 
-## 8. 设置项（模块）
+## 8. 设置项示例（模块）
 
 | key | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- |
@@ -340,9 +335,9 @@ screenshot (PNG)
 | `temperature` | number | 0.0 | 模型温度 |
 | `interval_min` / `interval_max` | number | 0.2 / 0.6 | 操作间随机等待（秒） |
 
-全局 `android.*` 设置（adb 路径、默认设备、点击偏移等）由框架提供；模块设置可覆盖/补充。
+这些是未来 Android 模块的设置示例。全局 `android.*` 设置（adb 路径、默认设备、点击偏移等）由框架提供；模块设置可覆盖/补充。
 
-## 9. 测试策略
+## 9. 测试策略参考
 
 ### 9.1 无设备单测
 

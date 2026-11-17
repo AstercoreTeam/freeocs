@@ -65,6 +65,7 @@
   let courseStartAttempted = false;
   let controllerPolling = false;
   let manualStop = false;
+  let runHalted = false;
   let submitHandoff = null;
   let submitWatcherRunning = false;
   let panelAnswer = "";
@@ -73,6 +74,14 @@
   let backendConnected = false;
   let currentStatus = "已连接，等待控制台";
   let runState = loadRunState();
+  const moduleSettings = { autoRecordSpeaking: true };
+
+  function applyAgentSettings(settings) {
+    if (!settings || typeof settings !== "object") return;
+    if ("auto_record_speaking" in settings) {
+      moduleSettings.autoRecordSpeaking = settings.auto_record_speaking !== false;
+    }
+  }
 
   function loadRunState() {
     const saved = gmGet(RUN_STATE_KEY, {});
@@ -178,6 +187,99 @@
   const PAGE_TRANSCRIPT_CACHE = new Map();
   const VIDEO_TRANSCRIPT_CACHE = new Map();
 
+  const PLAYER_TEXT_RE = /(?:Video Player is loading\.?|Current Time\s*[\d:]+|Duration\s*[\d:]+(?:\/[\d:]+)?|Loaded:\s*[\d.]+%|Stream Type\s*LIVE|Remaining Time\s*-?[\d:]+|\d+(?:\.\d+)?x\s*Chapters|descriptions (?:off|on), selected|subtitles (?:off|on), selected|This is a modal window\.?|倍速)/gi;
+
+  function cleanQuestionText(value) {
+    return String(value || "")
+      .replace(PLAYER_TEXT_RE, " ")
+      .replace(/[ \t]+/g, " ")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  function isAuthPage() {
+    if (location.hostname === "ucloud.unipus.cn") return true;
+    const url = location.href.toLowerCase();
+    if (/(?:sso\.unipus\.cn|\/sso\/login|cas-auth\/login|\/passport\/|\/login(?:[?#]|$))/.test(url)) {
+      return true;
+    }
+    for (const doc of pageDocuments()) {
+      if (doc.querySelector("input[type='password']")) {
+        const text = (doc.body?.innerText || "").slice(0, 2000);
+        if (/登录|login|sign in|统一身份认证|验证码/i.test(text)) return true;
+      }
+      const text = (doc.body?.innerText || "").slice(0, 400);
+      if (/扫码登录|统一身份认证|请先登录|请登录后/.test(text)) return true;
+    }
+    return false;
+  }
+
+  function hasVideoPlayerContainer() {
+    for (const doc of pageDocuments()) {
+      const node = doc.querySelector(
+        ".video-js, .question-video-player, .video-box, .video-learn-introduction, " +
+        "[class*='video-player'], [class*='videoPlayer'], .insert-video-player"
+      );
+      if (node && visible(node)) return true;
+    }
+    return false;
+  }
+
+  function normalizeOptionText(value) {
+    return String(value || "")
+      .replace(/^\s*[（(]?[A-Za-z][）)]?\s*[.、,:：)）]\s*/, "")
+      .replace(/\s+/g, " ")
+      .replace(/^[\s"'`“”]+|[\s"'`“”。]+$/g, "")
+      .trim()
+      .toLocaleLowerCase();
+  }
+
+  function extractChoiceLetters(answer, optionCount) {
+    const text = String(answer || "").toUpperCase();
+    const letters = (text.match(/(?<![A-Z])[A-Z](?![A-Z])/g) || [])
+      .filter((letter) => letter.charCodeAt(0) - 65 < optionCount);
+    const compact = text.replace(/[^A-Z]/g, "");
+    if (!letters.length && compact.length > 0 && compact.length <= Math.min(4, optionCount)) {
+      return [...new Set(compact.split(""))]
+        .filter((letter) => letter.charCodeAt(0) - 65 < optionCount);
+    }
+    return [...new Set(letters)];
+  }
+
+  function normalizeBlankValues(answer, count) {
+    const raw = String(answer || "").trim();
+    if (!raw) return [];
+    let values = [];
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) values = parsed;
+      else if (parsed && typeof parsed === "object") {
+        const inner = parsed.answer ?? parsed.answers;
+        if (Array.isArray(inner)) values = inner;
+        else if (typeof inner === "string") values = inner.split(/\r?\n/);
+      }
+    } catch (_) {
+      // Not JSON; fall through to text parsing.
+    }
+    if (!values.length) values = raw.split(/\r?\n/);
+    values = values
+      .map((value) => String(value ?? "")
+        .replace(/^\s*(?:[\[(（]?\d{1,3}[\]）)]?[.)、:：-]?|[-*•])\s*/, "")
+        .replace(/^[\s"'`“”]+|[\s"'`“”]+$/g, "")
+        .trim())
+      .filter(Boolean);
+    if (count > 1 && values.length === 1) {
+      const byDelimiter = raw.split(/\s*[|;；\t]\s*/).map((part) => part.trim()).filter(Boolean);
+      if (byDelimiter.length === count) values = byDelimiter;
+    }
+    if (count > 1 && values.length === 1) {
+      const tokens = raw.split(/\s+/).filter(Boolean);
+      if (tokens.length === count) values = tokens;
+    }
+    if (count > 0 && values.length > count) values = values.slice(0, count);
+    return values;
+  }
+
   function audioSources() {
     const found = new Map();
     for (const doc of pageDocuments()) {
@@ -195,26 +297,6 @@
       }
     }
     return [...found.keys()];
-  }
-
-  function fetchAudioBuffer(url) {
-    return new Promise((resolve, reject) => {
-      GM_xmlhttpRequest({
-        method: "GET",
-        url,
-        responseType: "arraybuffer",
-        timeout: 180000,
-        onload: (response) => {
-          if (response.status >= 200 && response.status < 300 && response.response) {
-            resolve(response.response);
-          } else {
-            reject(new Error(`HTTP ${response.status}`));
-          }
-        },
-        onerror: () => reject(new Error("音频下载失败。")),
-        ontimeout: () => reject(new Error("音频下载超时。")),
-      });
-    });
   }
 
   function arrayBufferToBase64(buffer) {
@@ -293,7 +375,7 @@
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
       if (AudioContextClass) {
         const context = new AudioContextClass();
-        if (context.state === "suspended") await context.resume();
+        await resumeAudioContext(context);
         const source = context.createMediaElementSource(video);
         const destination = context.createMediaStreamDestination();
         source.connect(destination);
@@ -390,7 +472,7 @@
     ];
     const candidates = [...doc.querySelectorAll(selectors.join(","))]
       .filter((element) => visible(element) && !element.closest("#uca-panel, #freeocs-ucampus-panel"))
-      .map((element) => element.innerText?.trim() || "")
+      .map((element) => cleanQuestionText(element.innerText?.trim() || ""))
       .filter((text) => text.length >= 12 && text.length <= 12000);
     if (candidates.length) return candidates[0];
 
@@ -399,9 +481,9 @@
     clone.querySelectorAll(
       "#uca-panel, #freeocs-ucampus-panel, script, style, nav, header, footer, aside, button, [role='button'], " +
       "[class*='nav'], [class*='menu'], [class*='sidebar'], [class*='catalog'], " +
-      "[class*='directory'], [class*='video'], [class*='player'], [class*='tab']"
+      "[class*='directory'], [class*='video'], [class*='player'], [class*='tab'], [class*='note']"
     ).forEach((element) => element.remove());
-    const text = clone.innerText?.trim() || "";
+    const text = cleanQuestionText(clone.innerText?.trim() || "");
     return text.length >= 12 ? text.slice(0, 12000) : "";
   }
 
@@ -420,7 +502,7 @@
         "[class*='comment'], [class*='discussion'], [class*='video-js']"
       ).forEach((element) => element.remove());
       const text = (clone.innerText || clone.textContent || "").trim();
-      if (text.length >= 40) return text.slice(0, 12000);
+      if (text.length >= 40) return cleanQuestionText(text).slice(0, 12000);
     }
     return "";
   }
@@ -619,26 +701,36 @@
     }
     return "";
   }
-
   function answerControls() {
     const docs = pageDocuments();
     for (const doc of docs) {
-      const anyFileInput = doc.querySelector("input[type='file']");
+      const fileInputs = [...doc.querySelectorAll("input[type='file']")]
+        .filter((element) => !element.closest("#uca-panel, #freeocs-ucampus-panel"));
+      if (fileInputs.length) {
+        const pageText = (doc.body?.innerText || "").slice(0, 1500);
+        const uploadContainer = doc.querySelector(
+          ".question-multi-file-upload, .unipus-upload, .ant-upload, " +
+          "[class*='audio-upload'], [class*='record-upload'], [class*='upload-audio']"
+        );
+        const speaks = /Speaking task|上传音频|上传录音|录音上传|将音频|录一段|朗读|音频|voice recording|record your (?:voice|answer|conversation)|upload your recording|record a (?:voice|answer)/i
+          .test(pageText);
+        const audioInput = fileInputs.find((element) =>
+          /audio|wav|mp3|mpeg|ogg|webm/i.test(element.getAttribute("accept") || "")
+        );
+        if (audioInput && (speaks || uploadContainer)) {
+          return { type: "oral", audioInput, doc };
+        }
+        if (speaks && fileInputs.length === 1) {
+          return { type: "oral", audioInput: fileInputs[0], doc };
+        }
+        if (uploadContainer && fileInputs.length === 1) {
+          const hint = `${uploadContainer.innerText || ""} ${uploadContainer.className || ""}`;
+          if (/录音|音频|audio|voice|record/i.test(hint)) {
+            return { type: "oral", audioInput: fileInputs[0], doc };
+          }
+        }
+      }
       const pageText = (doc.body?.innerText || "").slice(0, 1200);
-      if (anyFileInput &&
-        /Speaking task|上传音频|record your conversation|upload your recording/i.test(pageText)) {
-        return { type: "oral", audioInput: anyFileInput, doc };
-      }
-      const uploadInput = [...doc.querySelectorAll("input[type='file']")]
-        .find((element) => {
-          const accept = (element.getAttribute("accept") || "").toLowerCase();
-          return /audio|video|mp3|wav|mpeg|mp4/.test(accept) ||
-            element.closest("[class*='upload']");
-        });
-      if (uploadInput &&
-        /Speaking task|上传音频|将音频|录音|record your conversation/i.test(pageText)) {
-        return { type: "oral", audioInput: uploadInput, doc };
-      }
       if (/Start role-play/i.test(pageText)) {
         return { type: "roleplay", doc };
       }
@@ -822,7 +914,8 @@
     const videos = pageDocuments().flatMap((doc) =>
       [...doc.querySelectorAll("video")].filter((video) =>
         visible(video) && (
-          video.currentSrc || video.src || video.querySelector("source[src]")
+          video.currentSrc || video.src || video.getAttribute("data-src") ||
+          video.querySelector("source[src]")
         )
       )
     );
@@ -853,6 +946,7 @@
     updateRunLog(`无法继续：${reason}`, "error");
     setStatus(`未识别题目，已记录：${reason}\n${payload.question.slice(0, 240)}`, true);
     console.warn("[UCampus Assistant] 未识别题目", payload);
+    runHalted = true;
     return true;
   }
 
@@ -971,12 +1065,12 @@
       return;
     }
     if (controls.type === "multi-choice") {
-      const letters = [...new Set((answer.toUpperCase().match(/\b[A-Z]\b/g) || []))];
-      const normalized = answer.toLocaleLowerCase();
+      const letters = extractChoiceLetters(answer, controls.options.length);
+      const normalized = normalizeOptionText(answer);
       const matched = controls.options.filter((option, index) => {
         const letter = String.fromCharCode(65 + index);
-        return letters.includes(letter) ||
-          normalized.includes(option.text.toLocaleLowerCase());
+        const optionText = normalizeOptionText(option.text);
+        return letters.includes(letter) || (optionText && normalized.includes(optionText));
       });
       if (!matched.length) throw new Error("模型答案无法与多选题选项匹配。");
       for (const option of matched) {
@@ -989,13 +1083,24 @@
       return;
     }
     if (controls.type === "choice") {
-      const normalized = answer.trim().toLocaleLowerCase();
-      const matched = controls.options.find((option, index) => {
-        const optionText = option.text.toLocaleLowerCase();
-        const letter = String.fromCharCode(97 + index);
-        return normalized === letter || new RegExp(`^${letter}[.)、\\s]`).test(normalized) ||
-          normalized.includes(optionText);
-      });
+      const letters = extractChoiceLetters(answer, controls.options.length);
+      const normalized = normalizeOptionText(answer);
+      let matched = controls.options.find((option, index) =>
+        letters.includes(String.fromCharCode(65 + index))
+      );
+      if (!matched) {
+        matched = controls.options.find((option) => {
+          const optionText = normalizeOptionText(option.text);
+          return optionText && normalized.includes(optionText);
+        });
+      }
+      if (!matched) {
+        matched = controls.options.find((option) => {
+          const optionText = normalizeOptionText(option.text);
+          return optionText.length >= 3 && normalized.length >= 3 &&
+            (optionText.includes(normalized) || normalized.includes(optionText));
+        });
+      }
       if (!matched) throw new Error("模型答案无法与页面选项匹配。");
       if (matched.input.matches("[role='radio']") || matched.input.matches(".option")) {
         matched.input.click();
@@ -1014,19 +1119,7 @@
       return;
     }
     if (controls.type === "blanks") {
-      let values = [];
-      try {
-        const parsed = JSON.parse(answer.trim());
-        if (Array.isArray(parsed)) values = parsed;
-      } catch (_) {
-        // Fall back to a separated list below.
-      }
-      if (!values.length) {
-        values = answer.split(/\s*(?:\||\n|,|;|，|；)\s*/).filter((item) => item.trim());
-      }
-      if (values.length > controls.fields.length) {
-        values = values.slice(0, controls.fields.length);
-      }
+      const values = normalizeBlankValues(answer, controls.fields.length);
       if (values.length !== controls.fields.length) {
         throw new Error(`模型返回 ${values.length} 个答案，页面有 ${controls.fields.length} 个空。`);
       }
@@ -1958,6 +2051,7 @@
 
   async function waitingForManual(reason) {
     manualStop = true;
+    runHalted = true;
     automationRunning = false;
     setStatus(reason);
     updateRunLog(reason, "warn");
@@ -2047,6 +2141,16 @@
     return pageWindow;
   }
 
+  async function resumeAudioContext(context) {
+    if (!context || context.state !== "suspended") return;
+    try {
+      // Autoplay policy can keep resume() pending forever without a gesture.
+      await Promise.race([context.resume(), wait(1200)]);
+    } catch (_) {
+      // Keep going; decode/playback may still work.
+    }
+  }
+
   function dubbingScore(item) {
     const element = item.item?.querySelector(".score, [class*='score']");
     const text = (element?.innerText || "").trim();
@@ -2071,7 +2175,7 @@
     const AudioContextClass = pageWindow.AudioContext || pageWindow.webkitAudioContext;
     if (!AudioContextClass) throw new Error("页面不支持 Web Audio。");
     const context = new AudioContextClass();
-    if (context.state === "suspended") await context.resume();
+    await resumeAudioContext(context);
     const buffer = await context.decodeAudioData(await blob.arrayBuffer());
     const destination = context.createMediaStreamDestination();
     const source = context.createBufferSource();
@@ -2095,33 +2199,34 @@
     return score;
   }
 
-  async function recordRoleplayLine(mic, line) {
-    const buffer = await fetchAudioBuffer(
-      "http://127.0.0.1:10021/api/speech/reference/audio"
-    );
-    if (!buffer) throw new Error("参考录音为空。");
-    const pageWindow = installDubbingMic();
-    if (!pageWindow) throw new Error("页面没有可用的麦克风接口。");
-    const AudioContextClass = pageWindow.AudioContext || pageWindow.webkitAudioContext;
-    if (!AudioContextClass) throw new Error("页面不支持 Web Audio。");
-    const context = new AudioContextClass();
-    if (context.state === "suspended") await context.resume();
-    const audio = await context.decodeAudioData(buffer.slice(0));
-    const destination = context.createMediaStreamDestination();
-    const source = context.createBufferSource();
-    source.buffer = audio;
-    source.loop = true;
-    source.connect(destination);
-    pageWindow.__ucaDubbingStream = destination.stream;
-    source.start();
-    mic.click();
-    const words = (line || "").split(/\s+/).filter(Boolean).length;
-    await wait(Math.max(3500, Math.min(12000, words * 450 + 1500)));
-    mic.click();
-    await wait(2200);
-    try { source.stop(); } catch (_) {}
-    await context.close();
-    pageWindow.__ucaDubbingStream = null;
+  async function answerDubbing(controls) {
+    const pending = (controls.items || []).filter((item) => {
+      if (!item.text) return false;
+      const score = dubbingScore(item);
+      return score === null;
+    });
+    if (!pending.length) {
+      updateRunLog("朗读项均已有评分，直接继续", "info");
+      return true;
+    }
+    updateRunLog(`准备朗读 ${pending.length} 句（语音合成 → 模拟麦克风）`, "info");
+    const scores = [];
+    for (const item of pending) {
+      if (!automationRunning) return false;
+      scores.push(await recordDubbingItem(item));
+      await wait(600);
+    }
+    const scored = scores.filter((value) => Number.isFinite(value));
+    if (scored.length) {
+      const average = scored.reduce((sum, value) => sum + value, 0) / scored.length;
+      updateRunLog(
+        `朗读完成：${scored.join(", ")}，平均 ${average.toFixed(1)}`,
+        average >= 60 ? "success" : "warn"
+      );
+    }
+    if (!automationRunning) return false;
+    await clickPageAction();
+    return true;
   }
 
   async function answerRoleplay(controls) {
@@ -2163,13 +2268,12 @@
     const pageWindow = installDubbingMic();
     const AudioContextClass = pageWindow.AudioContext || pageWindow.webkitAudioContext;
     const context = new AudioContextClass();
-    if (context.state === "suspended") await context.resume();
+    await resumeAudioContext(context);
     const buffers = [];
     for (const line of learnerLines) {
       const blob = await request("/api/speech", {
         text: line.text,
         output_format: "mp3",
-        provider: "local",
       }, "blob");
       buffers.push(await context.decodeAudioData(await blob.arrayBuffer()));
     }
@@ -2398,6 +2502,10 @@
 
   async function processQuestion() {
     if (dismissBlockingDialog()) await wait(500);
+    if (isAuthPage()) {
+      await waitingForManual("请先在浏览器中登录 U校园；登录后点击开始继续");
+      return false;
+    }
     if (pendingNavigation) {
       pendingNavigation = false;
       setStatus("页面加载中，等待题目…");
@@ -2444,12 +2552,33 @@
     const previewControls = answerControls();
     updateRunLog(`当前题型：${previewControls.type}`, "info");
     if (previewControls.type === "roleplay") {
-      await waitingForManual("角色扮演需要录音/评分，已在提交前停止；请手动完成");
-      return false;
+      if (!moduleSettings.autoRecordSpeaking) {
+        await waitingForManual("角色扮演需要录音/评分，已在提交前停止；请手动完成");
+        return false;
+      }
+      try {
+        await answerRoleplay(previewControls);
+        updateRunLog("角色扮演已完成，停在提交前", "success", true);
+        return { type: "question" };
+      } catch (error) {
+        await reportUnknown(currentQuestion(), `角色扮演失败：${error.message}`);
+        return false;
+      }
     }
     if (previewControls.type === "dubbing") {
-      await waitingForManual("朗读评分题需要录音提交，已停止；请手动完成");
-      return false;
+      if (!moduleSettings.autoRecordSpeaking) {
+        await waitingForManual("朗读评分题需要录音提交，已停止；请手动完成");
+        return false;
+      }
+      try {
+        const done = await answerDubbing(previewControls);
+        if (!done) return false;
+        updateRunLog("朗读评分已完成，停在提交前", "success");
+        return { type: "question" };
+      } catch (error) {
+        await reportUnknown(currentQuestion(), `朗读评分失败：${error.message}`);
+        return false;
+      }
     }
     if (previewControls.type === "unsupported" && isVoicePracticePage()) {
       await waitingForManual("检测到朗读/配音/录音任务，请手动完成；完成提交后会自动继续");
@@ -2471,6 +2600,11 @@
     }
     if (!detectedVideo.video && unsupportedVideoSignal()) {
       await handleUnsupportedVideo("页面提示视频格式/播放不支持");
+      return { type: "content" };
+    }
+    if (!detectedVideo.video && hasVideoPlayerContainer() &&
+      previewControls.type === "unsupported" && !looksLikeQuestion(previewQuestion)) {
+      await handleUnsupportedVideo("未找到可播放的视频源");
       return { type: "content" };
     }
     if (detectedVideo.video && !videoWithQuestions) {
@@ -2822,6 +2956,7 @@
     automationRunning = true;
     clearPanelAnswer();
     const visited = new Set();
+    const visitCounts = new Map();
     updateRunLog("开始自动学习");
     if (automationIntro) {
       updateRunLog(automationIntro);
@@ -2831,7 +2966,9 @@
       while (automationRunning) {
         const stepKey = currentStepKey();
         const question = currentQuestion();
-        if (!pendingNavigation && visited.has(stepKey)) {
+        const visits = (visitCounts.get(stepKey) || 0) + 1;
+        visitCounts.set(stepKey, visits);
+        if (!pendingNavigation && visited.has(stepKey) && visits > 3) {
           await reportUnknown(question, "检测到重复页面，已停止以避免重复处理。");
           break;
         }
@@ -2970,6 +3107,7 @@
       if (automationRunning) return;
       clearSubmitHandoff();
       manualStop = false;
+      runHalted = false;
       runState = { completed: 0, entries: [] };
       gmSet(RUN_STATE_KEY, runState);
       if (isCourseDetailPage()) await startFromCourseDetail();
@@ -3231,15 +3369,18 @@
       nextSectionTab() ||
       contentTabs().length > 1 ||
       practiceTab() ||
-      pageActionButton()
+      pageActionButton() ||
+      hasVideoPlayerContainer()
     );
   }
 
   function hasContentForAutomation() {
+    if (isAuthPage()) return false;
     if (isCourseDetailPage()) return courseTasks().length > 0;
     if (isDiscussionPage()) return true;
     if (currentQuestion()) return true;
     if (videoForAutomation().video) return true;
+    if (hasVideoPlayerContainer()) return true;
     const controls = answerControls();
     if (controls.type !== "unsupported") return true;
     if (practiceTab()) return true;
@@ -3269,6 +3410,7 @@
         completed: runState.completed,
       });
       backendConnected = true;
+      applyAgentSettings(response.settings);
       updateControlPanel(response);
       if (response.command) {
         updateRunLog(`收到指令：${response.command.action}`);
@@ -3277,11 +3419,12 @@
           setStatus(`指令执行失败：${error.message}`, true);
         });
       }
-      if (response.active && response.lease && !automationRunning && !manualStop && !resumeScheduled) {
+      if (response.active && response.lease && !automationRunning && !manualStop &&
+        !runHalted && !resumeScheduled) {
         resumeScheduled = true;
         window.setTimeout(async () => {
           resumeScheduled = false;
-          if (automationRunning) return;
+          if (automationRunning || runHalted) return;
           try {
             if (isCourseDetailPage()) {
               if (!courseStartAttempted) await startFromCourseDetail();

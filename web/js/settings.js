@@ -242,5 +242,16 @@
     }
   }
 
-  window.SettingsUI = { render };
+  function renderSections(container, sections, values, reload) {
+    const list = sections || [];
+    container.innerHTML = list.length
+      ? list.map((section) => renderSection(section, values || {})).join("")
+      : UI.empty("没有可配置项");
+    for (const section of list) {
+      const sectionEl = container.querySelector(`#settings-section-${CSS.escape(section.id)}`);
+      if (sectionEl) bindSection(sectionEl, section, reload);
+    }
+  }
+
+  window.SettingsUI = { render, renderSections };
 })();

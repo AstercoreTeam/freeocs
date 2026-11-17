@@ -3,23 +3,37 @@
   "api_version": 1,
   "id": "wisdomtree",
   "name": "智慧树",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
-  "description": "智慧树手机答题：ADB 读取控件树，AI 选择答案；遇到交卷页停止。",
+  "description": "智慧树课程与测验网页自动化：浏览器扩展读取页面并通过 FreeOCS 模型作答。",
   "author": "FreeOCS",
   "license": "AGPL-3.0-only",
   "entry": "main:setup",
-  "platform": "android",
+  "platform": "web",
   "requires": [
     "llm.chat",
-    "android.adb"
+    "web.bridge"
   ],
-  "optional_requires": [
-    "media.ocr"
-  ],
+  "optional_requires": [],
   "provides": {},
   "dependencies": [],
   "min_app_version": "0.2.0",
+  "web": {
+    "allowed_hosts": [
+      "zhihuishu.com",
+      "*.zhihuishu.com"
+    ]
+  },
+  "page_agents": [
+    {
+      "id": "wisdomtree",
+      "matches": [
+        "*://zhihuishu.com/*",
+        "*://*.zhihuishu.com/*"
+      ],
+      "entry": "web/page-agent.js"
+    }
+  ],
   "panels": [
     {
       "id": "wisdomtree_console",
@@ -38,107 +52,125 @@
       "order": 310,
       "fields": [
         {
-          "key": "device_serial",
-          "type": "text",
-          "label": "设备序列号",
-          "default": "",
-          "placeholder": "留空使用全局设置"
+          "key": "auto_submit",
+          "type": "boolean",
+          "label": "自动提交作业",
+          "default": false,
+          "help": "默认关闭：答完后停在提交页等待人工核对。开启后会自动点击提交及确认按钮。"
         },
         {
-          "key": "click_jitter",
+          "key": "mastery_threshold",
           "type": "integer",
-          "label": "点击随机偏移（像素）",
-          "default": 2,
+          "label": "章节掌握度目标（%）",
+          "default": 85,
           "min": 0,
-          "max": 20,
-          "step": 1
-        },
-        {
-          "key": "dump_timeout",
-          "type": "number",
-          "label": "dump 超时（秒）",
-          "default": 15,
-          "min": 3,
-          "max": 60,
-          "step": 1
-        },
-        {
-          "key": "screenshot_timeout",
-          "type": "number",
-          "label": "截图超时（秒）",
-          "default": 20,
-          "min": 5,
-          "max": 120,
-          "step": 1
-        },
-        {
-          "key": "page_load_timeout",
-          "type": "number",
-          "label": "页面加载等待（秒）",
-          "default": 8,
-          "min": 1,
-          "max": 60,
-          "step": 1
-        },
-        {
-          "key": "poll_interval",
-          "type": "number",
-          "label": "操作后等待（秒）",
-          "default": 0.8,
-          "min": 0.2,
-          "max": 10,
-          "step": 0.1
-        },
-        {
-          "key": "max_tool_rounds",
-          "type": "integer",
-          "label": "最大工具轮数",
-          "default": 30,
-          "min": 3,
           "max": 100,
           "step": 1
         },
         {
-          "key": "temperature",
+          "key": "click_interval_ms",
+          "type": "integer",
+          "label": "点击间隔（毫秒）",
+          "default": 1500,
+          "min": 200,
+          "max": 10000,
+          "step": 100
+        },
+        {
+          "key": "click_jitter_ms",
+          "type": "integer",
+          "label": "点击间隔随机误差（毫秒）",
+          "default": 500,
+          "min": 0,
+          "max": 5000,
+          "step": 100
+        },
+        {
+          "key": "max_questions_per_exam",
+          "type": "integer",
+          "label": "每套题最大题数",
+          "default": 80,
+          "min": 1,
+          "max": 200,
+          "step": 1
+        },
+        {
+          "key": "max_chapters_per_run",
+          "type": "integer",
+          "label": "每次最多处理章节数",
+          "default": 100,
+          "min": 1,
+          "max": 500,
+          "step": 1
+        },
+        {
+          "key": "max_answers_per_chapter",
+          "type": "integer",
+          "label": "每章节最多重做次数",
+          "default": 3,
+          "min": 1,
+          "max": 10,
+          "step": 1
+        },
+        {
+          "key": "max_no_test_attempts",
+          "type": "integer",
+          "label": "无试题章节最大尝试次数",
+          "default": 2,
+          "min": 1,
+          "max": 10,
+          "step": 1
+        },
+        {
+          "key": "max_open_fail_attempts",
+          "type": "integer",
+          "label": "无法打开章节最大尝试次数",
+          "default": 2,
+          "min": 1,
+          "max": 10,
+          "step": 1
+        },
+        {
+          "key": "empty_pending_retries",
+          "type": "integer",
+          "label": "无待处理章节时复查次数",
+          "default": 3,
+          "min": 0,
+          "max": 10,
+          "step": 1
+        },
+        {
+          "key": "empty_pending_retry_ms",
+          "type": "integer",
+          "label": "章节复查间隔（毫秒）",
+          "default": 3000,
+          "min": 1000,
+          "max": 10000,
+          "step": 500
+        },
+        {
+          "key": "answer_timeout",
+          "type": "number",
+          "label": "模型答题超时（秒）",
+          "default": 120,
+          "min": 10,
+          "max": 600,
+          "step": 10
+        },
+        {
+          "key": "answer_temperature",
           "type": "number",
           "label": "模型温度",
-          "default": 0.0,
-          "min": 0,
-          "max": 1,
-          "step": 0.1
-        },
-        {
-          "key": "ocr_fallback",
-          "type": "boolean",
-          "label": "控件树失败时 OCR 兜底",
-          "default": true
-        },
-        {
-          "key": "ocr_min_confidence",
-          "type": "number",
-          "label": "OCR 最低置信度",
-          "default": 0.5,
-          "min": 0,
-          "max": 1,
-          "step": 0.05
-        },
-        {
-          "key": "interval_min",
-          "type": "number",
-          "label": "操作间隔最小值（秒）",
           "default": 0.2,
           "min": 0,
-          "max": 5,
+          "max": 1,
           "step": 0.1
         },
         {
-          "key": "interval_max",
-          "type": "number",
-          "label": "操作间隔最大值（秒）",
-          "default": 0.6,
-          "min": 0,
-          "max": 5,
-          "step": 0.1
+          "key": "allow_short_answer",
+          "type": "boolean",
+          "label": "允许处理主观题/简答题",
+          "default": true
         }
       ]
     }

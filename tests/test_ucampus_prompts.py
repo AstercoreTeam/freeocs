@@ -77,6 +77,24 @@ def test_parse_blanks_lines() -> None:
     assert answer == "one\ntwo"
 
 
+def test_parse_blanks_inline_numbering_and_separators() -> None:
+    assert parse_answer("1. apple 2. banana 3. cherry", "blanks", 3)[0] == ("apple\nbanana\ncherry")
+    assert parse_answer("apple | banana | cherry", "blanks", 3)[0] == ("apple\nbanana\ncherry")
+    assert parse_answer('{"answer":["a","b"]}', "blanks", 2)[0] == "a\nb"
+    assert parse_answer("1=apple\n2=banana", "blanks", 2)[0] == "apple\nbanana"
+
+
+def test_parse_blanks_keeps_extra_punctuation_but_strips_numbering() -> None:
+    answer, _ = parse_answer("1) in the morning\n2) at night", "blanks", 2)
+    assert answer == "in the morning\nat night"
+
+
+def test_blanks_prompt_without_count_is_generic() -> None:
+    prompt = build_prompt({"question": "Fill in.", "question_type": "blanks", "blank_count": 0})
+    assert "0 个空" not in prompt
+    assert "多空填空题" in prompt
+
+
 def test_parse_matching() -> None:
     assert parse_answer("D A B C", "matching")[0] == "D\nA\nB\nC"
     assert parse_answer('["D","A"]', "matching")[0] == "D\nA"

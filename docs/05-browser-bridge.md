@@ -446,6 +446,12 @@ extension/
 - 显示当前版本、扩展 ID、最近错误。
 - 配置保存在 `storage.local`，不包含密钥。
 
+### 7.6 独立浏览器启动器
+
+首页的“选择要执行的网页”步骤提供 U校园（`https://course.unipus.cn/`）和智慧树（`https://www.zhihuishu.com/`）。点击“打开”后会在 Windows/Linux 上检测 Chrome、Edge、Brave 或 Chromium，并通过独立进程打开新窗口，使用 Chromium 的 `--load-extension` 参数加载应用准备好的扩展目录。Firefox 不支持此命令行自动加载方式，不会用于快捷启动。
+
+快捷启动使用 FreeOCS 专属的持久浏览器配置目录（应用数据目录下 `browser-profiles/chromium`），不复用用户日常浏览器配置。首次打开需要在新窗口登录；之后登录状态保留在该独立配置中。若找不到兼容浏览器或扩展文件未准备好，启动 API 会返回错误；用户仍可按 7.4 节手动安装扩展到自己的浏览器配置。
+
 ## 8. 安全
 
 1. **只监听回环地址**；不提供局域网访问。

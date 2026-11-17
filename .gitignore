@@ -26,6 +26,8 @@ test-results/
 data/
 logs/
 models/
+!web/pages/models/
+!web/pages/models/**
 *.log
 *.tmp
 *.bak

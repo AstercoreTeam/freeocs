@@ -40,6 +40,7 @@ class KokoCloneTTS:
             "vocoder_dir": str(get("vocoder_dir", "") or "").strip(),
             "vocab_config": str(get("vocab_config", "") or "").strip(),
             "language": str(get("language", "en") or "en").strip().lower(),
+            "max_chars": int(get("max_chars", 0) or 0),
             "timeout": float(get("timeout", 600) or 600),
         }
 
@@ -67,11 +68,16 @@ class KokoCloneTTS:
         text = (text or "").strip()
         if not text:
             raise ProviderError("TTS 文本为空", provider="tts_kokoclone")
-        if len(text) > 5000:
-            raise ProviderError("TTS 文本超过 5000 字符", provider="tts_kokoclone")
-
         settings = self._settings()
-        reference = Path(settings["reference_audio"]).expanduser() if settings["reference_audio"] else None
+        max_chars = settings["max_chars"]
+        if max_chars > 0 and len(text) > max_chars:
+            raise ProviderError(
+                f"TTS 文本超过单次合成上限（{max_chars} 字符）；可在插件设置中调整或设为 0 取消限制。",
+                provider="tts_kokoclone",
+            )
+        reference = (
+            Path(settings["reference_audio"]).expanduser() if settings["reference_audio"] else None
+        )
         if reference is None or not reference.is_file():
             raise ProviderError(
                 "未配置用于克隆的参考音频；请到设置 → 克隆语音选择一段 3-10 秒人声。",
@@ -92,7 +98,9 @@ class KokoCloneTTS:
             if not Path(settings[key]).expanduser().is_file():
                 raise ProviderError(f"模型文件不存在：{settings[key]}", provider="tts_kokoclone")
         if settings["vocoder_dir"] and not Path(settings["vocoder_dir"]).expanduser().is_dir():
-            raise ProviderError(f"Vocoder 目录不存在：{settings['vocoder_dir']}", provider="tts_kokoclone")
+            raise ProviderError(
+                f"Vocoder 目录不存在：{settings['vocoder_dir']}", provider="tts_kokoclone"
+            )
 
         output_dir = self.api.data_dir / "tts"
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -177,7 +185,11 @@ class KokoCloneTTS:
                 timeout=settings["timeout"],
                 check=False,
             )
-            if completed.returncode != 0 or not output_path.is_file() or output_path.stat().st_size <= 44:
+            if (
+                completed.returncode != 0
+                or not output_path.is_file()
+                or output_path.stat().st_size <= 44
+            ):
                 detail = (completed.stderr or completed.stdout or "未生成音频")[-1500:]
                 raise ProviderError(
                     f"KokoClone 合成失败（退出码 {completed.returncode}）：{detail}",
@@ -215,14 +227,20 @@ class KokoCloneTTS:
             cloner = KokoClone.__new__(KokoClone)
             cloner.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             cloner.hf_repo = ""
-            cloner.kanade = KanadeModel.from_pretrained(
-                config_path=settings["kanade_config"],
-                weights_path=settings["kanade_weights"],
-            ).to(cloner.device).eval()
+            cloner.kanade = (
+                KanadeModel.from_pretrained(
+                    config_path=settings["kanade_config"],
+                    weights_path=settings["kanade_weights"],
+                )
+                .to(cloner.device)
+                .eval()
+            )
             if settings["vocoder_dir"]:
                 from vocos import Vocos
 
-                cloner.vocoder = Vocos.from_pretrained(settings["vocoder_dir"]).eval().to(cloner.device)
+                cloner.vocoder = (
+                    Vocos.from_pretrained(settings["vocoder_dir"]).eval().to(cloner.device)
+                )
             else:
                 cloner.vocoder = load_vocoder(cloner.kanade.config.vocoder_name).to(cloner.device)
             cloner.sample_rate = cloner.kanade.config.sample_rate
