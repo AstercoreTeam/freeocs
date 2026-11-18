@@ -191,6 +191,17 @@
       visible(element.closest("label"));
   }
 
+  function visibleDocument(doc) {
+    if (!doc || doc === document) return true;
+    try {
+      const frame = doc.defaultView?.frameElement;
+      if (!frame || frame.closest("#freeocs-ucampus-panel, #uca-panel")) return false;
+      return visible(frame);
+    } catch (_) {
+      return false;
+    }
+  }
+
   function pageDocuments() {
     const docs = [document];
     for (let index = 0; index < docs.length; index += 1) {
@@ -2312,6 +2323,10 @@
 
   function isManualDragPage() {
     for (const doc of pageDocuments()) {
+      if (!visibleDocument(doc)) continue;
+      // Speaking/oral upload pages also mention "drag files here"; they are
+      // handled by the oral flow, never by the drag detector.
+      if (doc.querySelector("input[type='file']")) continue;
       const controls = [...doc.querySelectorAll(
         "[draggable='true'], .drag-item, [class*='drag-item'], [class*='dragItem'], " +
         "[class*='sortable-item'], [class*='sortable-list-item'], " +
@@ -2321,9 +2336,15 @@
         visible(element) && !element.closest("#freeocs-ucampus-panel, #uca-panel")
       );
       if (controls.length) return true;
-      const text = (doc.body?.innerText || "").slice(0, 6000);
-      if (/拖动|拖拽|拖放|拖动排序|排序题|drag\s+(?:the|items|to)|drop\s+(?:here|items)|reorder/i.test(text) &&
-        (hasSubmitAction() || doc.querySelector("[class*='question'], [class*='match']"))) {
+      // innerText respects display:none, so hidden old tabs/frames cannot
+      // trigger the drag detector.  Strip our own panel text explicitly.
+      const panelText = doc.getElementById?.("freeocs-ucampus-panel")?.innerText || "";
+      const text = (doc.body?.innerText || "").replace(panelText, "").slice(0, 6000);
+      // "将音频拖动到此处" is an upload dropzone, not a drag question.
+      if (!/拖动(?:下列|以下|项目|排序|句子)|拖拽(?:下列|以下|项目)|拖动排序|按顺序拖动|reorder|drag\s+(?:the\s+)?(?:items|sentences|following)/i.test(text)) {
+        continue;
+      }
+      if (hasSubmitAction() || doc.querySelector("[class*='question'], [class*='match']")) {
         return true;
       }
     }
@@ -2985,11 +3006,15 @@
     const question = currentQuestion() || (document.body?.innerText || "").slice(0, 1800).trim();
     const context = pageContextForModel().slice(0, 10000);
     const items = [];
+    for (const doc of pageDocuments()) {
+      if (!visibleDocument(doc)) continue;
+    }
     const addItem = (value) => {
       const text = String(value || "").trim().replace(/\s+/g, " ");
       if (text && text.length <= 500 && !items.includes(text)) items.push(text);
     };
     for (const doc of pageDocuments()) {
+      if (!visibleDocument(doc)) continue;
       for (const element of doc.querySelectorAll(
         "[draggable='true'], .drag-item, [class*='drag-item'], [class*='dragItem'], " +
         "[class*='sortable-item'], [class*='sortable-list-item'], " +
