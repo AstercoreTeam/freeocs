@@ -3714,6 +3714,24 @@
           await wait(1000);
         }
         if (submitDialogVisible()) continue;
+        if (isQuizSummaryPage()) {
+          const next = nextQuestionButton() || pageActionButton();
+          if (!next) {
+            clearSubmitHandoff("答题小结没有继续按钮，自动流程结束");
+            setStatus("答题小结没有继续按钮，流程结束。");
+            updateRunLog("答题小结没有继续按钮，流程结束", "warn");
+            return;
+          }
+          updateRunLog("提交后点击继续学习", "success");
+          const target = next.element || next;
+          target.click();
+          await wait(1600);
+          if (isQuizSummaryPage()) {
+            clearSubmitHandoff("点击继续学习后页面未切换，停止");
+            setStatus("点击继续学习后页面未切换，已停止。");
+            return;
+          }
+        }
         if (isDiscussionPage()) {
           // Publishing clears the editor but leaves us on the same discussion
           // page.  Always move forward; never restart and answer it again.
