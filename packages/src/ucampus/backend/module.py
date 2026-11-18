@@ -32,7 +32,7 @@ from freeocs.sdk import (
     parse_json_object,
 )
 
-from .prompts import build_prompt, parse_answer
+from .prompts import build_prompt, parse_answer, parse_error
 
 
 def _now() -> str:
@@ -408,6 +408,9 @@ class UcampusModule(Module):
                 **kwargs,
             )
             text = str((reply.message or {}).get("content") or "")
+            ai_error = parse_error(text)
+            if ai_error:
+                raise ModuleError(f"AI 缺少上下文，拒绝猜测：{ai_error}")
             parsed, note = parse_answer(text, question_type, blank_count)
             return parsed, note, text
 

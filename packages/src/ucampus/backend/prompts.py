@@ -105,6 +105,11 @@ def build_prompt(payload: dict[str, Any]) -> str:
             "适合朗读的英文作答。仅返回 JSON 对象，格式为 "
             '{"answer":"..."}，不要返回 explanation、解析或其它字段。'
         )
+    if question_type in {"choice", "multi-choice", "dropdown", "discussion", "oral", "essay", "essays", "batch", "drag"}:
+        parts.append(
+            '如果题目或材料不足以确定答案，绝对不要猜测；请返回 '
+            '{"error":"缺少上下文的具体原因"}，不要编造答案。'
+        )
     return "\n\n".join(parts)
 
 
@@ -147,6 +152,15 @@ def _parse_batch(raw: str) -> str:
         values = [values]
     cleaned = [str(item).strip() for item in values if str(item).strip()]
     return "\n".join(cleaned) if cleaned else (raw or "").strip()
+
+
+def parse_error(raw: str) -> str:
+    decoded = _json_candidate(raw)
+    if isinstance(decoded, dict):
+        error = decoded.get("error")
+        if isinstance(error, str) and error.strip():
+            return error.strip()
+    return ""
 
 
 def _parse_standard(raw: str) -> tuple[str, str]:

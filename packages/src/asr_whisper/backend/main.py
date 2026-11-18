@@ -134,26 +134,34 @@ class WhisperASR:
                 except Exception as exc:  # noqa: BLE001
                     self.api.log("warn", f"WAV 预读失败，交给 faster-whisper：{exc}")
                     model_input = str(transcribe_path)
-            with self._lock:
-                segments, info = model.transcribe(
-                    model_input,
-                    language=lang,
-                    beam_size=5,
-                    vad_filter=bool(self.api.settings.get("vad_filter", True)),
-                )
-                parts: list[str] = []
-                details: list[dict] = []
-                for segment in segments:
-                    text = (segment.text or "").strip()
-                    if text:
-                        parts.append(text)
-                        details.append(
-                            {
-                                "start": float(getattr(segment, "start", 0.0) or 0),
-                                "end": float(getattr(segment, "end", 0.0) or 0),
-                                "text": text,
-                            }
-                        )
+            def run(vad_filter: bool):
+                with self._lock:
+                    segments, info = model.transcribe(
+                        model_input,
+                        language=lang,
+                        beam_size=5,
+                        vad_filter=vad_filter,
+                    )
+                    parts: list[str] = []
+                    details: list[dict] = []
+                    for segment in segments:
+                        text = (segment.text or "").strip()
+                        if text:
+                            parts.append(text)
+                            details.append(
+                                {
+                                    "start": float(getattr(segment, "start", 0.0) or 0),
+                                    "end": float(getattr(segment, "end", 0.0) or 0),
+                                    "text": text,
+                                }
+                            )
+                return parts, info, details
+
+            parts, info, details = run(bool(self.api.settings.get("vad_filter", True)))
+            if not parts and self.api.settings.get("vad_filter", True):
+                # Very short word recordings can be entirely removed by VAD.
+                self.api.log("warn", "ASR 未识别到文本，关闭 VAD 重试")
+                parts, info, details = run(False)
             return Transcript(
                 text=" ".join(parts).strip(),
                 language=str(getattr(info, "language", "") or ""),

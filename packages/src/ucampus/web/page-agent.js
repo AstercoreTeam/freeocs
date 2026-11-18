@@ -421,12 +421,14 @@
     if (!sources.length || sources.length > maxSources) return Promise.resolve([]);
     return (async () => {
       const parts = [];
-      for (const url of sources.slice(0, maxCount)) {
+      for (const [index, url] of sources.slice(0, maxCount).entries()) {
         try {
-          parts.push(await transcribeAudioUrl(url) || "");
+          const text = await transcribeAudioUrl(url) || "";
+          if (!text) updateRunLog(`音频${index + 1} 转写为空`, "warn");
+          parts.push(text);
         } catch (error) {
           console.warn("[UCampus Assistant] 音频转写失败", url, error);
-          updateRunLog(`音频转写失败：${error.message}`, "error");
+          updateRunLog(`音频${index + 1} 转写失败：${error.message}`, "error");
           parts.push("");
         }
       }
@@ -3406,6 +3408,49 @@
     if (!videoTranscript) await primePageAudio();
     const audioList = audioSources();
     const controls = answerControls();
+    const blankAudio = controls.type === "blanks" && audioList.length > 1;
+    const listeningPage = /听录音|听单词|listen to|listening|选出你所听到/i.test(
+      document.body?.innerText || ""
+    );
+    const audioLimit = (blankAudio || listeningPage) ? 12 : 3;
+    if (!videoTranscript && audioList.length >= 1 && audioList.length <= audioLimit) {
+      const pageKey = `${location.href}|${blankAudio ? "blanks" : "normal"}`;
+      if (!PAGE_TRANSCRIPT_CACHE.has(pageKey)) {
+        updateRunLog(`检测到 ${audioList.length} 个听力音频，开始转写`, "info");
+        setStatus("正在转写听力音频…");
+        let text = "";
+        if (blankAudio || listeningPage) {
+          const parts = await pageAudioTranscripts(12, 12);
+          text = parts
+            .map((part, index) => part ? `音频${index + 1}：${part}` : "")
+            .filter(Boolean)
+            .join("\n");
+        } else {
+          text = await pageAudioTranscript();
+          if (!text) {
+            setStatus("音频下载失败，正在录制系统声音…");
+            try {
+              text = await recordPageAudioTranscript();
+            } catch (error) {
+              updateRunLog(`系统录音转写失败：${error.message}`, "error");
+            }
+          }
+        }
+        if (text) PAGE_TRANSCRIPT_CACHE.set(pageKey, text);
+      }
+      audioTranscript = PAGE_TRANSCRIPT_CACHE.get(pageKey) || "";
+      if (audioTranscript) updateRunLog("听力音频转写完成", "info");
+    }
+
+    if (listeningPage && !audioTranscript &&
+      ["dropdown", "choice", "multi-choice", "blank", "blanks"].includes(controls.type)) {
+      const reason = "听力页未获取到音频或转写，AI 不猜测答案";
+      updateRunLog(reason, "error");
+      setStatus(reason, true);
+      await reportUnknown(currentQuestion(), reason);
+      return false;
+    }
+
     if (controls.type === "dropdown" && (controls.dropdowns || []).length > 1) {
       try {
         await answerDropdownBatch(controls, audioTranscript);
@@ -3452,40 +3497,6 @@
       await clickPageAction();
       return { type: "question" };
     }
-    const blankAudio = controls.type === "blanks" && audioList.length > 1;
-    const listeningPage = /听录音|听单词|listen to|listening|选出你所听到/i.test(
-      document.body?.innerText || ""
-    );
-    const audioLimit = (blankAudio || listeningPage) ? 12 : 3;
-    if (!videoTranscript && audioList.length >= 1 && audioList.length <= audioLimit) {
-      const pageKey = `${location.href}|${blankAudio ? "blanks" : "normal"}`;
-      if (!PAGE_TRANSCRIPT_CACHE.has(pageKey)) {
-        updateRunLog(`检测到 ${audioList.length} 个听力音频，开始转写`, "info");
-        setStatus("正在转写听力音频…");
-        let text = "";
-        if (blankAudio || listeningPage) {
-          const parts = await pageAudioTranscripts(12, 12);
-          text = parts
-            .map((part, index) => part ? `音频${index + 1}：${part}` : "")
-            .filter(Boolean)
-            .join("\n");
-        } else {
-          text = await pageAudioTranscript();
-          if (!text) {
-            setStatus("音频下载失败，正在录制系统声音…");
-            try {
-              text = await recordPageAudioTranscript();
-            } catch (error) {
-              updateRunLog(`系统录音转写失败：${error.message}`, "error");
-            }
-          }
-        }
-        if (text) PAGE_TRANSCRIPT_CACHE.set(pageKey, text);
-      }
-      audioTranscript = PAGE_TRANSCRIPT_CACHE.get(pageKey) || "";
-      if (audioTranscript) updateRunLog("听力音频转写完成", "info");
-    }
-
     const question = currentQuestion();
     if (submittedSteps.has(currentStepKey()) && !hasSubmitAction()) {
       updateRunLog("该页已提交，跳过重复提交", "info");
