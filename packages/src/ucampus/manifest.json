@@ -21,7 +21,9 @@
     "media.ocr"
   ],
   "provides": {},
-  "dependencies": [],
+  "dependencies": [
+    "imageio-ffmpeg>=0.5,<1"
+  ],
   "min_app_version": "0.2.0",
   "web": {
     "allowed_hosts": [

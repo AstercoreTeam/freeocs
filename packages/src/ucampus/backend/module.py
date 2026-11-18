@@ -12,6 +12,8 @@ import binascii
 import hashlib
 import json
 import re
+import shutil
+import subprocess
 import threading
 import time
 import uuid
@@ -787,6 +789,47 @@ class UcampusModule(Module):
     def _listen(self, _payload: dict[str, Any]) -> dict[str, Any]:
         raise ModuleError("系统录音未启用；请让页面提供音频 URL，或手动完成听力题")
 
+    @staticmethod
+    def _to_mp3(data: bytes) -> bytes:
+        """Convert TTS WAV/other audio to MP3 for U校园 upload controls."""
+        executable = shutil.which("ffmpeg") or ""
+        if not executable:
+            try:
+                import imageio_ffmpeg
+                executable = imageio_ffmpeg.get_ffmpeg_exe()
+            except Exception:
+                executable = ""
+        if not executable:
+            raise ModuleError("需要 ffmpeg 或 imageio-ffmpeg 把音频转换为 MP3")
+        try:
+            completed = subprocess.run(
+                [
+                    executable,
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-i",
+                    "pipe:0",
+                    "-f",
+                    "mp3",
+                    "-codec:a",
+                    "libmp3lame",
+                    "-b:a",
+                    "128k",
+                    "pipe:1",
+                ],
+                input=data,
+                capture_output=True,
+                check=False,
+                timeout=60,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ModuleError(f"音频转 MP3 失败：{exc}") from exc
+        if completed.returncode != 0 or not completed.stdout:
+            detail = (completed.stderr or b"").decode("utf-8", "replace")[-500:]
+            raise ModuleError(f"音频转 MP3 失败：{detail or 'ffmpeg 无输出'}")
+        return completed.stdout
+
     def _tts(self, payload: dict[str, Any]) -> dict[str, Any]:
         text = str(payload.get("text", "") or "").strip()
         if not text:
@@ -800,12 +843,19 @@ class UcampusModule(Module):
         )
         tts = self.ctx.require("media.tts")
         result = tts.synthesize(text, voice=voice, language=language, output_format=output_format)
-        if len(result.data) > 20_000_000:
+        data = result.data
+        mime = result.mime
+        ext = result.ext
+        if output_format.lower() == "mp3" and ext.lower() != "mp3":
+            data = self._to_mp3(data)
+            mime = "audio/mpeg"
+            ext = "mp3"
+        if len(data) > 20_000_000:
             raise ModuleError("生成的音频过大")
         return {
-            "audio_base64": base64.b64encode(result.data).decode("ascii"),
-            "mime": result.mime,
-            "ext": result.ext,
+            "audio_base64": base64.b64encode(data).decode("ascii"),
+            "mime": mime,
+            "ext": ext,
             "duration": result.duration,
         }
 

@@ -55,7 +55,7 @@
           </dl>
 
           <div class="uca-safety mt-8">
-            不会自动提交、交卷或发布。遇到这些页面会停止，请人工核对后操作。
+            默认只填答案；可在面板开启自动提交。
           </div>
 
           <div class="flex items-center justify-between mt-14">

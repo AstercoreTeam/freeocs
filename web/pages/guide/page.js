@@ -199,7 +199,7 @@
             { title: "连接目标", text: "网页模块需要浏览器扩展已连接并登录目标网站；手机模块需要 ADB 设备已授权。" },
             { title: "打开模块", text: "在“应用与插件”中点击“打开”，检查能力状态。" },
             { title: "开始", text: "点击“开始”，观察状态与日志。" },
-            { title: "手动提交", text: "遇到提交/交卷/发布页面时模块会停止。请核对答案后手动完成。" },
+            { title: "手动提交", text: "默认在提交/交卷/发布页面停止；可在 U校园面板开启自动提交。" },
           ])}
         </div>
       </div>
@@ -208,7 +208,7 @@
         <div class="card">
           <h3 class="card-title">常见问题</h3>
           <details class="mt-8"><summary>为什么开始按钮是灰的？</summary><p class="form-help">模块不可用：可能缺少能力提供者（例如未安装 LLM/ASR 插件），或扩展/设备未连接。到“应用与插件”和日志页查看原因。</p></details>
-          <details class="mt-8"><summary>为什么停在“等待手动提交”？</summary><p class="form-help">这是安全模式：FreeOCS 不会点击提交/交卷/发布。请核对页面答案后手动提交。</p></details>
+          <details class="mt-8"><summary>为什么停在“等待手动提交”？</summary><p class="form-help">默认不自动提交；在 U校园面板打开“自动提交”后会点击提交/交卷/发布。</p></details>
           <details class="mt-8"><summary>浏览器扩展连接不上？</summary><p class="form-help">确认扩展已加载、已启用；确认本地服务端口与扩展设置一致；刷新目标页面；重启浏览器后 Firefox 临时扩展需要重新加载。</p></details>
           <details class="mt-8"><summary>听力转写失败？</summary><p class="form-help">检查 ASR 插件是否启用、模型目录是否正确、音频 URL 是否需要登录/Referer。失败时模块会停止而不是猜测。</p></details>
           <details class="mt-8"><summary>模型返回无法匹配选项？</summary><p class="form-help">可能是模型输出格式不稳定或页面选项文本特殊。查看日志中的 raw 输出；换用更稳定的模型或降低温度。</p></details>

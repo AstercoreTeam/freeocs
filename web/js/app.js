@@ -123,7 +123,7 @@
       const info = (state.bootstrap && state.bootstrap.app) || {};
       await UI.modal({
         title: "关于 FreeOCS",
-        message: `版本：${info.version || "?"}\n平台：${info.platform || "?"}\nPython：${info.python || "?"}\n数据目录：${info.data_dir || "?"}\n设置目录：${info.config_dir || "?"}\n\nCopyright 2026 AstercoreTeam\n作者：\nqincnd <qincnd@qq.com>\nXueZicheng <xuezicheng842@outlook.com>\n\n许可：GNU Affero General Public License v3.0 only\nhttps://spdx.org/licenses/AGPL-3.0-only.html\n\n本地优先 · 插件化 · 绝不自动提交`,
+        message: `版本：${info.version || "?"}\n平台：${info.platform || "?"}\nPython：${info.python || "?"}\n数据目录：${info.data_dir || "?"}\n设置目录：${info.config_dir || "?"}\n\nCopyright 2026 AstercoreTeam\n作者：\nqincnd <qincnd@qq.com>\nXueZicheng <xuezicheng842@outlook.com>\n\n许可：GNU Affero General Public License v3.0 only\nhttps://spdx.org/licenses/AGPL-3.0-only.html\n\n本地优先 · 插件化`,
         confirmText: "知道了",
         cancelText: "关闭",
       });

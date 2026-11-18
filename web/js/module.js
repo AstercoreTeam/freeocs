@@ -248,7 +248,7 @@
               <div class="card">
                 <h3 class="card-title">运行提示</h3>
                 <div class="form-help">${UI.escapeHtml((module.web && module.web.allowed_hosts || []).length ? "页面 Agent 会自动注入匹配的网页；请按操作指南完成浏览器扩展安装。" : "该模块由应用内控制；启动前请确认所需设备/服务已连接。")}</div>
-                <div class="form-help mt-8">本应用不会自动提交、交卷或发布，请在提交页手动确认。</div>
+                <div class="form-help mt-8">默认只填答案；可在 U校园面板开启自动提交。</div>
               </div>
             </div>
             ${this.sections.length ? '<div class="tab-panel" data-panel="settings"><div class="card"><div id="module-settings"></div></div></div>' : ""}

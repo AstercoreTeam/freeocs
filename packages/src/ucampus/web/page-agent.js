@@ -74,6 +74,7 @@
   let backendConnected = false;
   let currentStatus = "已连接，等待控制台";
   let runState = loadRunState();
+  let autoSubmitEnabled = gmGet("ucaAutoSubmit", false) === true;
   const moduleSettings = { autoRecordSpeaking: true };
 
   function applyAgentSettings(settings) {
@@ -2242,7 +2243,7 @@
   }
 
   function findSubmitButton() {
-    const labels = ["提交", "交卷", "保存并提交", "提交答案", "确定提交"];
+    const labels = ["提交", "交卷", "保存并提交", "提交答案", "确定提交", "提交作业", "发布"];
     for (const doc of pageDocuments()) {
       for (const element of doc.querySelectorAll("button, [role='button'], a")) {
         const label = (element.innerText || "").trim().replace(/\s+/g, "");
@@ -2253,6 +2254,56 @@
       }
     }
     return null;
+  }
+
+  function findSubmitConfirmButton() {
+    const labels = ["确定", "确认", "提交", "确定提交", "确认提交", "继续"];
+    for (const doc of pageDocuments()) {
+      for (const element of doc.querySelectorAll(
+        "button, [role='button'], .ant-btn, [class*='confirm'], [class*='submit']"
+      )) {
+        if (!visible(element) || element.closest("#freeocs-ucampus-panel, #uca-panel")) continue;
+        if (element.disabled || element.getAttribute("aria-disabled") === "true") continue;
+        const label = (element.innerText || element.getAttribute("aria-label") || "")
+          .trim().replace(/\s+/g, "");
+        if (!label || /取消|关闭|返回|再想想/.test(label)) continue;
+        if (labels.includes(label) || /确定|确认/.test(label)) {
+          return { element, label };
+        }
+      }
+    }
+    return null;
+  }
+
+  async function autoSubmitPage(reason = "自动提交") {
+    const submit = findSubmitButton();
+    if (submit) {
+      // Arm the existing post-submit watcher so the next module starts
+      // automatically after the page changes.
+      armSubmitHandoff(submit.label);
+      updateRunLog(`自动提交：点击“${submit.label}”`, "warn");
+      submit.element.click();
+      await wait(900);
+      const confirm = findSubmitConfirmButton();
+      if (confirm && submitDialogVisible()) {
+        updateRunLog(`自动提交：点击确认“${confirm.label}”`, "warn");
+        confirm.element.click();
+        await wait(600);
+      }
+      return true;
+    }
+    if (submitDialogVisible()) {
+      const confirm = findSubmitConfirmButton();
+      if (confirm) {
+        armSubmitHandoff("提交确认");
+        updateRunLog(`自动提交：确认“${confirm.label}”`, "warn");
+        confirm.element.click();
+        await wait(600);
+        return true;
+      }
+    }
+    updateRunLog(`自动提交未找到提交按钮：${reason}`, "warn");
+    return false;
   }
 
   function submitDialogVisible() {
@@ -2269,6 +2320,9 @@
   }
 
   async function waitingForManual(reason) {
+    if (autoSubmitEnabled && /提交|交卷|发布/.test(reason)) {
+      if (await autoSubmitPage(reason)) return;
+    }
     manualStop = true;
     runHalted = true;
     automationRunning = false;
@@ -2334,6 +2388,9 @@
     const action = pageActionButton();
     if (!action) {
       if (hasSubmitAction()) {
+        if (autoSubmitEnabled) {
+          if (await autoSubmitPage("已填完")) return true;
+        }
         await waitingForManual("已填完，等待手动提交");
       }
       return false;
@@ -3455,7 +3512,7 @@
       }
       await applyAnswer(command.value, controls);
       updateRunLog("控制台答案已回填到当前页面", "success");
-      setStatus("答案已回填；不会自动提交。");
+      setStatus("答案已回填；自动提交开关开启时会在完成后提交。");
       return;
     }
     if (command.action === "attach_audio") {
@@ -3581,7 +3638,8 @@
             <button type="button" class="foc-stop" data-foc="stop">停止</button>
             <button type="button" class="foc-ai" data-foc="ai">生成兼容性报告</button>
           </div>
-          <div class="foc-note">只填答案，不会自动提交/交卷/发布。控制范围仅限本标签页。</div>
+          <label class="foc-auto"><input type="checkbox" data-foc="auto-submit" /> 自动提交</label>
+          <div class="foc-note">关闭时只填答案；开启后会在作答完成后提交。控制范围仅限本标签页。</div>
         </div>`;
       const style = document.createElement("style");
       style.id = "freeocs-ucampus-panel-style";
@@ -3621,6 +3679,8 @@
         #freeocs-ucampus-panel .foc-ai{border:1px solid #7c3aed;background:#7c3aed;color:#fff;}
         #freeocs-ucampus-panel .foc-ai[hidden]{display:none !important;}
         #freeocs-ucampus-panel button:disabled{opacity:.45;cursor:not-allowed;}
+        #freeocs-ucampus-panel .foc-auto{display:flex;align-items:center;gap:5px;margin-top:7px;color:#46536a;font-size:11px;cursor:pointer;user-select:none;}
+        #freeocs-ucampus-panel .foc-auto input{accent-color:#dc2626;}
         #freeocs-ucampus-panel .foc-note{margin-top:7px;color:#8a94a6;font-size:10px;line-height:1.4;}
         @media (prefers-color-scheme: dark){
           #freeocs-ucampus-panel{background:#1a2130;color:#e7edf7;border-color:#3a4760;}
@@ -3639,6 +3699,20 @@
       start.addEventListener("click", () => void panelCommand("start", start));
       stop.addEventListener("click", () => void panelCommand("stop", stop));
       ai.addEventListener("click", () => void runAiDirect(ai));
+      const autoSubmit = host.querySelector('[data-foc="auto-submit"]');
+      if (autoSubmit) {
+        autoSubmit.checked = autoSubmitEnabled;
+        autoSubmit.addEventListener("change", () => {
+          autoSubmitEnabled = Boolean(autoSubmit.checked);
+          gmSet("ucaAutoSubmit", autoSubmitEnabled);
+          updateRunLog(autoSubmitEnabled ? "已开启自动提交" : "已关闭自动提交", "warn");
+          if (autoSubmitEnabled) {
+            void (async () => {
+              if (hasSubmitAction()) await autoSubmitPage("开关开启");
+            })();
+          }
+        });
+      }
       collapse.addEventListener("click", () => {
         controlPanelCollapsed = !controlPanelCollapsed;
         host.classList.toggle("collapsed", controlPanelCollapsed);

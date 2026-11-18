@@ -55,6 +55,7 @@
       let selected = "";
       let timer = null;
       let polling = false;
+      let lastSignature = "";
 
       target.innerHTML = `
         <div class="page-header">
@@ -92,6 +93,14 @@
         try {
           const result = await API.must("get_ai_calls", 500);
           calls = result.calls || [];
+          const signature = calls.map((call) => `${call.ts}|${call.ok}|${call.model}`).join("\n");
+          if (signature === lastSignature) {
+            return;
+          }
+          lastSignature = signature;
+          const listScroll = listEl.scrollTop;
+          const detailScroll = detailEl.scrollTop;
+          const windowScroll = window.scrollY;
           const stats = result.stats || {};
           statsEl.innerHTML = `
             <div class="ai-call-stat"><span>记录数</span><strong>${Number(stats.calls || 0)}</strong></div>
@@ -116,6 +125,9 @@
             const call = calls.find((item) => item.ts === selected);
             if (call) detailEl.innerHTML = detailHtml(call);
           }
+          listEl.scrollTop = listScroll;
+          detailEl.scrollTop = detailScroll;
+          window.scrollTo({ top: windowScroll });
         } catch (error) {
           listEl.innerHTML = UI.empty(error.message || "读取 AI 调用记录失败", "!");
         } finally {

@@ -10,7 +10,7 @@ running
   │ 页面 Agent 轮询，拿到 lease 和 start
   ▼
 识别页面
-  ├─ 提交/交卷/发布/评分 → waiting（手动）
+  ├─ 提交/交卷/发布/评分 → 自动提交开关开启时提交，否则 waiting
   ├─ roleplay/dubbing   → waiting（手动）
   ├─ 有题目             → 请求模型 → 回填 → 下一题/停止
   ├─ 有视频             → 播放/转写 → 下一子模块
