@@ -142,6 +142,14 @@
             <label class="form-label" for="home-llm-model">模型名称</label>
             <input class="input" id="home-llm-model" type="text" />
           </div>
+          <div class="form-group home-thinking-group">
+            <label class="form-label">深度思考</label>
+            <label class="form-inline">
+              <input type="checkbox" id="home-llm-thinking" />
+              开启深度思考
+            </label>
+            <span class="form-help">DeepSeek 思考模式；默认关闭，会产生 reasoning token 并增加耗时。</span>
+          </div>
         </div>
         <p class="form-help" data-role="model-help"></p>
         <div class="home-model-actions">
@@ -743,6 +751,7 @@
       const keyGroup = target.querySelector('[data-role="api-key-group"]');
       const urlInput = target.querySelector("#home-llm-url");
       const modelInput = target.querySelector("#home-llm-model");
+      const thinkingInput = target.querySelector("#home-llm-thinking");
       const modelHelp = target.querySelector('[data-role="model-help"]');
       const saveButton = target.querySelector('[data-action="save-model"]');
       const testButton = target.querySelector('[data-action="test-model"]');
@@ -759,6 +768,7 @@
       modeInput.value = currentMode;
       urlInput.value = profiles[currentMode].baseUrl;
       modelInput.value = profiles[currentMode].model;
+      thinkingInput.checked = llm.deep_thinking === true;
       renderMode();
 
       modeInput.addEventListener("change", () => {
@@ -783,6 +793,7 @@
             provider_mode: modeInput.value,
             base_url: urlInput.value.trim(),
             model: modelInput.value.trim(),
+            deep_thinking: Boolean(thinkingInput.checked),
             api_key: modeInput.value === "ollama" ? null : keyInput.value,
           };
           await API.must("save_settings", "llm", saveValues);

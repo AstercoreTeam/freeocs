@@ -27,6 +27,7 @@ class OpenAICompatibleLLM:
             "base_url": str(get("llm", "base_url", "") or "").strip(),
             "api_key": str(get("llm", "api_key", "") or "").strip(),
             "model": str(get("llm", "model", "") or "").strip(),
+            "deep_thinking": bool(get("llm", "deep_thinking", False)),
             "temperature": float(get("llm", "temperature", 0.2) or 0.2),
             "max_tokens": int(get("llm", "max_tokens", 2048) or 2048),
             "timeout": float(get("llm", "timeout", 300) or 300),
@@ -76,6 +77,12 @@ class OpenAICompatibleLLM:
             "max_tokens": settings["max_tokens"] if max_tokens is None else int(max_tokens),
             "stream": False,
         }
+        # DeepSeek defaults to thinking mode.  Only send this for DeepSeek
+        # endpoints; generic OpenAI-compatible servers may reject the field.
+        if "deepseek" in settings["base_url"].lower() or settings["model"].lower().startswith("deepseek"):
+            payload["thinking"] = {
+                "type": "enabled" if settings.get("deep_thinking") else "disabled"
+            }
         if tools:
             payload["tools"] = list(tools)
             payload["tool_choice"] = tool_choice or "auto"

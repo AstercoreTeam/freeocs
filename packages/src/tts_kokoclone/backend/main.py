@@ -68,13 +68,19 @@ class KokoCloneTTS:
         here = Path(__file__).resolve()
         for parent in here.parents:
             candidates.append(parent / "models")
+        # Resolve relative to the program entry (main.py / frozen executable),
+        # never the current working directory.
+        entry = Path(sys.argv[0]).resolve() if sys.argv else None
+        if entry is not None and entry.name != "main.py" and not getattr(sys, "frozen", False):
+            entry = None
         candidates.extend(
             [
+                entry.parent / "models" if entry else None,
                 Path(sys.executable).resolve().parent / "models",
                 Path(sys.executable).resolve().parent / "_internal" / "models",
-                Path.cwd() / "models",
             ]
         )
+        candidates = [item for item in candidates if item is not None]
         for candidate in candidates:
             if (
                 (candidate / "kokoro" / "kokoro.onnx").is_file()

@@ -247,3 +247,6 @@
 .home-usage-progress { height: 6px; margin-top: 10px; overflow: hidden; border-radius: 99px; background: var(--border); }
 .home-usage-progress span { display: block; height: 100%; border-radius: inherit; background: var(--primary); }
 @media (max-width: 760px) { .home-usage-grid { grid-template-columns: 1fr; } }
+
+.home-thinking-group { grid-column: 1 / -1; }
+.home-thinking-group .form-inline { margin-top: 4px; }

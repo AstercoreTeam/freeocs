@@ -179,7 +179,12 @@ class ModelDownloadManager:
             raise ModelDownloadError("请选择模型保存目录")
         root: Path | None = None
         if not model.ollama_tag:
-            root = Path(target_dir).expanduser().resolve()
+            root = Path(target_dir).expanduser()
+            if not root.is_absolute():
+                # Relative paths are anchored to the program/models root,
+                # never to whatever cwd the process happened to inherit.
+                root = self.default_dir.parent / root
+            root = root.resolve()
             if root.exists() and not root.is_dir():
                 raise ModelDownloadError(f"保存位置不是目录：{root}")
             root.mkdir(parents=True, exist_ok=True)
