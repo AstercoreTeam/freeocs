@@ -662,11 +662,24 @@
             .map((item) => (item.textContent || item.innerText || "").trim())
             .filter(Boolean)
           : [];
-        const paragraph = wrapper.closest("p");
-        const stem = (paragraph?.innerText || `第 ${index + 1} 空`)
-          .replace((textElement?.innerText || "").trim(), "")
-          .trim();
-        return { element: wrapper, trigger, textElement, options, stem, index };
+        const paragraph = wrapper.closest(
+          "p, li, .item, [class*='item'], [class*='question'], " +
+          "[class*='sentence'], [class*='content']"
+        ) || wrapper.parentElement;
+        let stem = (paragraph?.innerText || `第 ${index + 1} 空`)
+          .replace((textElement?.innerText || "").trim(), "");
+        if (optionHost) {
+          const optionText = (optionHost.innerText || "").trim();
+          if (optionText) stem = stem.replace(optionText, "");
+        }
+        for (const option of options) stem = stem.replace(option, "");
+        stem = stem.replace(/点击选择|请选择/g, "").trim();
+        if (!stem) stem = `第 ${index + 1} 空`;
+        const bold = [...(paragraph?.querySelectorAll("strong, b, [style*='font-weight: bold'], .bold") || [])]
+          .map((element) => (element.innerText || element.textContent || "").trim())
+          .filter(Boolean)
+          .join(" | ");
+        return { element: wrapper, trigger, textElement, options, stem, bold, index };
       })
       .filter((item) => item.trigger && item.options.length >= 2);
   }
@@ -3206,7 +3219,8 @@
       const options = (item.options || []).map((text, optionIndex) =>
         `${String.fromCharCode(65 + optionIndex)}. ${text}`
       ).join("\n");
-      return `${index + 1}. ${item.stem || "未命名题目"}\n选项：\n${options}`;
+      const bold = item.bold ? `（加粗部分：${item.bold}）` : "";
+      return `${index + 1}. ${item.stem || "未命名题目"}${bold}\n选项：\n${options}`;
     });
     const question = [
       audioTranscript ? `[听力原文]\n${audioTranscript}` : "",
@@ -3412,7 +3426,7 @@
     const listeningPage = /Directions\s*[:：]?\s*听|听录音|听单词|听句子|选出你所听到|listen\s+(?:to|and)|what\s+(?:did|do)\s+you\s+hear/i.test(
       document.body?.innerText || ""
     );
-    const audioLimit = (blankAudio || listeningPage) ? 12 : 3;
+    const audioLimit = (blankAudio || listeningPage) ? 30 : 3;
     if (!videoTranscript && audioList.length >= 1 && audioList.length <= audioLimit) {
       const pageKey = `${location.href}|${blankAudio ? "blanks" : "normal"}`;
       if (!PAGE_TRANSCRIPT_CACHE.has(pageKey)) {
@@ -3420,7 +3434,7 @@
         setStatus("正在转写听力音频…");
         let text = "";
         if (blankAudio || listeningPage) {
-          const parts = await pageAudioTranscripts(12, 12);
+          const parts = await pageAudioTranscripts(30, 30);
           text = parts
             .map((part, index) => part ? `音频${index + 1}：${part}` : "")
             .filter(Boolean)
@@ -3456,7 +3470,8 @@
         await answerDropdownBatch(controls, audioTranscript);
         return { type: "question" };
       } catch (error) {
-        updateRunLog(`批量下拉作答失败，回退逐题处理：${error.message}`, "warn");
+        updateRunLog(`批量下拉作答失败，已停止，不再逐题回退：${error.message}`, "error");
+        return false;
       }
     }
     if ((controls.type === "choice" || controls.type === "multi-choice") &&
@@ -3465,7 +3480,8 @@
         await answerChoiceBatch(controls, audioTranscript);
         return { type: "question" };
       } catch (error) {
-        updateRunLog(`批量选择题作答失败，回退逐题处理：${error.message}`, "warn");
+        updateRunLog(`批量选择题作答失败，已停止，不再逐题回退：${error.message}`, "error");
+        return false;
       }
     }
     if (controls.type === "dictation") {
@@ -3509,6 +3525,9 @@
     let questionForModel = audioTranscript
       ? `${question || "听力题"}\n\n[听力原文]\n${audioTranscript}`
       : question;
+    if (controls.type === "dropdown" && controls.dropdown?.bold) {
+      questionForModel += `\n\n加粗部分：${controls.dropdown.bold}`;
+    }
     if (controls.type === "matching") {
       questionForModel += "\n\n[单词]\n" +
         controls.words.map((word, index) => `${index + 1}. ${word}`).join("\n") +
@@ -3834,8 +3853,10 @@
           continue;
         }
         const pendingControls = answerControls();
+        // Do not treat a filled-in blank (which changes innerText) as a new
+        // question; that caused the same blanks page to be answered forever.
         if (currentStepKey() !== stepKey &&
-          ["choice", "dropdown", "blanks"].includes(pendingControls.type)) {
+          ["choice", "dropdown"].includes(pendingControls.type)) {
           updateRunLog("当前页还有下一题，直接继续", "info");
           continue;
         }
