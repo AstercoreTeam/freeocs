@@ -2298,8 +2298,9 @@
     for (const doc of pageDocuments()) {
       const controls = [...doc.querySelectorAll(
         "[draggable='true'], .drag-item, [class*='drag-item'], [class*='dragItem'], " +
-        "[class*='sortable'], [class*='sort-item'], [class*='sortItem'], " +
-        "[class*='dnd-'], [class*='drop-zone'], [class*='drag-']"
+        "[class*='sortable-item'], [class*='sortable-list-item'], " +
+        "[class*='sort-item'], [class*='sortItem'], [class*='dnd-item'], " +
+        "[class*='drop-zone'], [class*='drag-']"
       )].filter((element) =>
         visible(element) && !element.closest("#freeocs-ucampus-panel, #uca-panel")
       );
@@ -2317,6 +2318,11 @@
     if (isManualDragPage()) {
       updateRunLog("检测到拖动/排序题，需要用户手动拖动，已跳过自动提交", "warn");
       setStatus("拖动/排序题需要手动完成，未自动提交。");
+      return false;
+    }
+    if (answerControls().type === "matching") {
+      updateRunLog("检测到匹配/排序下拉题，需要用户手动确认，已跳过自动提交", "warn");
+      setStatus("匹配题需要手动选择，未自动提交。");
       return false;
     }
     if (isDiscussionPage()) {
@@ -2907,7 +2913,8 @@
     for (const doc of pageDocuments()) {
       for (const element of doc.querySelectorAll(
         "[draggable='true'], .drag-item, [class*='drag-item'], [class*='dragItem'], " +
-        "[class*='sort-item'], [class*='sortItem'], [class*='sortable']"
+        "[class*='sortable-item'], [class*='sortable-list-item'], " +
+        "[class*='sort-item'], [class*='sortItem'], [class*='dnd-item']"
       )) {
         if (!visible(element) || element.closest("#freeocs-ucampus-panel, #uca-panel")) continue;
         let text = (element.innerText || element.textContent || "").trim().replace(/\s+/g, " ");
