@@ -75,9 +75,6 @@
   let currentStatus = "已连接，等待控制台";
   let runState = loadRunState();
   let autoSubmitEnabled = gmGet("ucaAutoSubmit", false) === true;
-  const submittedDiscussionKeys = new Set(
-    (gmGet("ucaDiscussionSubmitKeys", []) || []).filter((item) => typeof item === "string")
-  );
   const moduleSettings = { autoRecordSpeaking: true };
 
   function applyAgentSettings(settings) {
@@ -2298,12 +2295,25 @@
     return false;
   }
 
-  async function answerDiscussion() {
-    const discussionPageKey = `page|${location.href}`;
-    if (submittedDiscussionKeys.has(discussionPageKey)) {
-      updateRunLog("当前讨论页已经发布过评论，跳过重复生成", "warn");
-      return false;
+  async function discussionAnswerExists(text, timeoutMs = 5000) {
+    const normalized = String(text || "").replace(/\s+/g, "").trim();
+    if (!normalized) return false;
+    const target = normalized.slice(0, 120);
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      for (const doc of pageDocuments()) {
+        const comments = [...doc.querySelectorAll(
+          "[class*='comment-list'], [class*='commentList'], [class*='comment_list'], " +
+          "[class*='discussion-cloud-recordList-item'], [class*='comment-item']"
+        )].map((element) => String(element.innerText || "").replace(/\s+/g, ""));
+        if (comments.some((value) => value.includes(target))) return true;
+      }
+      await wait(400);
     }
+    return false;
+  }
+
+  async function answerDiscussion() {
     for (const doc of pageDocuments()) {
       const editor = doc.querySelector(
         "textarea[placeholder*='评论'], [contenteditable='true'][data-placeholder*='评论']"
@@ -2320,14 +2330,9 @@
         question_type: "discussion",
       });
       if (!result.answer) return false;
-      const normalizedAnswer = String(result.answer).replace(/\s+/g, "").slice(0, 160);
-      const comments = [...doc.querySelectorAll(
-        "[class*='comment-list'], [class*='commentList'], [class*='comment_list'], " +
-        "[class*='discussion-cloud-recordList-item']"
-      )].map((element) => String(element.innerText || "").replace(/\s+/g, "")).join("");
-      if (normalizedAnswer && comments.includes(normalizedAnswer)) {
+      if (await discussionAnswerExists(result.answer)) {
         updateRunLog("讨论区已存在相同评论，跳过重复发布", "warn");
-        return false;
+        return "duplicate";
       }
       writeText(editor, result.answer.slice(0, 500));
       await wait(500);
@@ -2461,17 +2466,12 @@
         updateRunLog("讨论编辑器为空，跳过自动发布", "warn");
         return false;
       }
-      const key = `${location.href}|${text.replace(/\s+/g, " ").trim()}`;
-      const pageKey = `page|${location.href}`;
-      if (submittedDiscussionKeys.has(pageKey) || submittedDiscussionKeys.has(key)) {
-        updateRunLog("该讨论页已发布过评论，跳过重复发布", "warn");
+      if (await discussionAnswerExists(text)) {
+        updateRunLog("讨论区已存在相同评论，跳过重复发布", "warn");
         return true;
       }
       const publish = findDiscussionPublishButton(editor);
       if (publish) {
-        submittedDiscussionKeys.add(pageKey);
-        submittedDiscussionKeys.add(key);
-        gmSet("ucaDiscussionSubmitKeys", [...submittedDiscussionKeys].slice(-50));
         armSubmitHandoff("发布");
         updateRunLog("自动提交：发布讨论评论", "warn");
         publish.element.click();
@@ -3281,14 +3281,14 @@
     }
     if (isDiscussionPage()) {
       const filled = await answerDiscussion();
+      if (filled === "duplicate") {
+        updateRunLog("讨论区已存在相同评论，跳过并继续", "info");
+        return { type: "content" };
+      }
       if (filled) {
         runState.completed += 1;
         await waitingForManual("讨论答案已填入，等待手动发布");
         return false;
-      }
-      if (submittedDiscussionKeys.has(`page|${location.href}`)) {
-        updateRunLog("当前讨论页已发布，跳过重复评论", "info");
-        return { type: "content" };
       }
       updateRunLog("讨论页没有可填写的编辑器，自动流程已停止", "error");
       return false;
@@ -3409,7 +3409,7 @@
     const audioList = audioSources();
     const controls = answerControls();
     const blankAudio = controls.type === "blanks" && audioList.length > 1;
-    const listeningPage = /听录音|听单词|listen to|listening|选出你所听到/i.test(
+    const listeningPage = /Directions\s*[:：]?\s*听|听录音|听单词|听句子|选出你所听到|listen\s+(?:to|and)|what\s+(?:did|do)\s+you\s+hear/i.test(
       document.body?.innerText || ""
     );
     const audioLimit = (blankAudio || listeningPage) ? 12 : 3;
@@ -3479,12 +3479,16 @@
         let prompt = (container?.innerText || "").trim();
         if (!prompt) prompt = currentQuestion();
         prompt = prompt.slice(0, 2000);
+        if (audioTranscript) {
+          prompt += `\n\n[听力原文]\n${audioTranscript}`;
+        }
         setStatus(`正在回答第 ${index + 1}/${controls.fields.length} 道问答题…`);
         updateRunLog(`问答题 ${index + 1}：请求模型`, "info");
         const result = await request("/api/answer", {
           question: prompt,
           question_type: "essay",
-          context: pageContextForModel(),
+          context: [pageContextForModel(), audioTranscript ? `[听力原文]\n${audioTranscript}` : ""]
+            .filter(Boolean).join("\n\n"),
         });
         if (!result.answer) {
           updateRunLog(`问答题 ${index + 1} 未生成答案`, "error");
@@ -3687,10 +3691,6 @@
 
   function armSubmitHandoff(label) {
     if (submitHandoff) return;
-    if (isDiscussionPage()) {
-      submittedDiscussionKeys.add(`page|${location.href}`);
-      gmSet("ucaDiscussionSubmitKeys", [...submittedDiscussionKeys].slice(-50));
-    }
     submitHandoff = {
       signature: pageSignature(),
       at: Date.now(),
