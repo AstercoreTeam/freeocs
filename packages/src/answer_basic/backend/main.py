@@ -42,8 +42,8 @@ class BasicChoiceAnswer:
             prompt += f"\n\n选项：\n{option_lines}"
         prompt += (
             "\n\n只返回 JSON 对象，格式为 "
-            '{"answer":"A","explanation":"简短理由"}。'
-            "answer 必须是选项字母之一。"
+            '{"answer":"A"}。'
+            "answer 必须是选项字母之一；不要返回 explanation 或解析。"
         )
         result = llm.chat(
             [

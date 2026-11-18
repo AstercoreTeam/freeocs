@@ -22,6 +22,7 @@ TYPE_LABELS = {
     "matching": "匹配题",
     "oral": "口语题",
     "discussion": "讨论题",
+    "drag": "拖动/排序题",
 }
 
 
@@ -41,7 +42,7 @@ def build_prompt(payload: dict[str, Any]) -> str:
             "这是多选题。answer 输出所有正确选项的字母，用逗号或空格分隔，"
             "例如 A, C。不要只给一个选项。"
         )
-        parts.append('仅返回 JSON 对象，格式为 {"answer":"...","explanation":"..."}。')
+        parts.append('仅返回 JSON 对象，格式为 {"answer":"..."}，不要返回 explanation、解析或其它字段。')
     elif question_type == "matching":
         if re.search(r"arrange|order|sort|排序|顺序", question, re.IGNORECASE):
             parts.append(
@@ -54,24 +55,31 @@ def build_prompt(payload: dict[str, Any]) -> str:
                 "用空格分隔，例如 D A B C。不要 JSON，不要编号，不要解释。"
             )
         parts.append("只输出这一行字母，不要输出任何其它文字。")
+    elif question_type == "drag":
+        parts.append(
+            "这是拖动/排序题。拖动项已经用 A、B、C 等字母标注。请根据题目和材料，"
+            "按正确顺序只输出这些字母，用空格分隔，例如 C A F B D E。"
+            "不要输出拖动项原文、编号、JSON 或解释。"
+        )
+        parts.append("只输出这一行字母，不要输出任何其它文字。")
     elif question_type == "discussion":
         parts.append(
             "这是讨论区题目。answer 用 1-2 句简短英文直接回答，控制在 30-60 词，"
             "观点明确、适合直接发布，不要分点，不要额外解释。"
         )
-        parts.append('仅返回 JSON 对象，格式为 {"answer":"...","explanation":"..."}。')
+        parts.append('仅返回 JSON 对象，格式为 {"answer":"..."}，不要返回 explanation、解析或其它字段。')
     elif question_type == "oral":
         parts.append(
             "这是口语/朗读题。answer 用自然英文写成 60 秒以内、约 80-100 词的简短对话，"
             "适合直接朗读，不要解释。"
         )
-        parts.append('仅返回 JSON 对象，格式为 {"answer":"...","explanation":"..."}。')
+        parts.append('仅返回 JSON 对象，格式为 {"answer":"..."}，不要返回 explanation、解析或其它字段。')
     elif question_type in {"essay", "essays"}:
         parts.append(
             "这是开放式问答题。answer 用 80-120 词英文完整回答，观点清楚，"
             "直接可填入答题框，不要分点，不要额外解释。"
         )
-        parts.append('仅返回 JSON 对象，格式为 {"answer":"...","explanation":"..."}。')
+        parts.append('仅返回 JSON 对象，格式为 {"answer":"..."}，不要返回 explanation、解析或其它字段。')
     elif question_type == "blanks":
         count = blank_count or 0
         if count > 0:
@@ -88,7 +96,7 @@ def build_prompt(payload: dict[str, Any]) -> str:
             "请根据题目作答。选择题的 answer 写选项字母及选项内容；"
             "填空题的 answer 写可直接填入的内容；口语题的 answer 写自然、"
             "适合朗读的英文作答。仅返回 JSON 对象，格式为 "
-            '{"answer":"...","explanation":"..."}。'
+            '{"answer":"..."}，不要返回 explanation、解析或其它字段。'
         )
     return "\n\n".join(parts)
 

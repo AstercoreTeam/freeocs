@@ -125,9 +125,16 @@
             const call = calls.find((item) => item.ts === selected);
             if (call) detailEl.innerHTML = detailHtml(call);
           }
-          listEl.scrollTop = listScroll;
-          detailEl.scrollTop = detailScroll;
-          window.scrollTo({ top: windowScroll });
+          const restoreScroll = () => {
+            listEl.scrollTop = listScroll;
+            detailEl.scrollTop = detailScroll;
+            window.scrollTo({ top: windowScroll, left: 0, behavior: "auto" });
+          };
+          // Restore after the browser has laid out the rebuilt list.
+          window.requestAnimationFrame(() => {
+            restoreScroll();
+            window.requestAnimationFrame(restoreScroll);
+          });
         } catch (error) {
           listEl.innerHTML = UI.empty(error.message || "读取 AI 调用记录失败", "!");
         } finally {
@@ -141,7 +148,13 @@
         catch (error) { UI.toast(error.message || "无法打开目录", "error"); }
       });
       await load();
-      timer = window.setInterval(() => { if (!document.hidden) void load(); }, 2500);
+      timer = window.setInterval(() => {
+        if (document.hidden) return;
+        // Do not rebuild the list while the user is reading/scrolled down.
+        // This is what caused the page to jump back to the top every poll.
+        if (window.scrollY > 2 || listEl.scrollTop > 2 || detailEl.scrollTop > 2) return;
+        void load();
+      }, 2500);
       return { destroy: () => window.clearInterval(timer) };
     },
   });

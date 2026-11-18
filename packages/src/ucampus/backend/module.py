@@ -505,7 +505,7 @@ class UcampusModule(Module):
             "只返回 JSON：",
             '{"report":"给开发者的 Markdown 报告",'
             '"actions":[{"type":"click","index":0,"reason":"..."}],'
-            '"answer":"可选答案","explanation":"给用户的简短说明"}',
+            '"answer":"可选答案"}',
         ]
         prompt = "\n\n".join(lines)
         try:

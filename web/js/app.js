@@ -167,7 +167,7 @@
     const content = document.getElementById("page-content");
     content.innerHTML = '<div class="page-loading"><span class="spinner"></span> 正在加载…</div>';
     try {
-      const assetVersion = "20261117-5";
+      const assetVersion = "20261117-6";
       await loadScript(`pages/${id}/page.js?v=${assetVersion}`);
       loadCss(`pages/${id}/page.css?v=${assetVersion}`);
       const response = await fetch(`pages/${id}/index.html`, { cache: "no-store" });

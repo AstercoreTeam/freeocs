@@ -75,6 +75,7 @@
   let currentStatus = "已连接，等待控制台";
   let runState = loadRunState();
   let autoSubmitEnabled = gmGet("ucaAutoSubmit", false) === true;
+  const submittedDiscussionKeys = new Set();
   const moduleSettings = { autoRecordSpeaking: true };
 
   function applyAgentSettings(settings) {
@@ -2275,7 +2276,75 @@
     return null;
   }
 
+  function findDiscussionPublishButton(editor) {
+    let root = editor;
+    for (let depth = 0; depth < 7 && root; depth += 1, root = root.parentElement) {
+      const buttons = [...root.querySelectorAll("button, [role='button'], a, .ant-btn")]
+        .filter((element) =>
+          visible(element) &&
+          !element.closest("#freeocs-ucampus-panel, #uca-panel") &&
+          !element.disabled &&
+          element.getAttribute("aria-disabled") !== "true"
+        );
+      const publish = buttons.find((element) =>
+        (element.innerText || "").trim().replace(/\s+/g, "") === "发布"
+      );
+      if (publish) return { element: publish, label: "发布" };
+    }
+    return null;
+  }
+
+  function isManualDragPage() {
+    for (const doc of pageDocuments()) {
+      const controls = [...doc.querySelectorAll(
+        "[draggable='true'], .drag-item, [class*='drag-item'], [class*='dragItem'], " +
+        "[class*='sortable'], [class*='sort-item'], [class*='sortItem'], " +
+        "[class*='dnd-'], [class*='drop-zone'], [class*='drag-']"
+      )].filter((element) =>
+        visible(element) && !element.closest("#freeocs-ucampus-panel, #uca-panel")
+      );
+      if (controls.length) return true;
+      const text = (doc.body?.innerText || "").slice(0, 6000);
+      if (/拖动|拖拽|拖放|拖动排序|排序题|drag\s+(?:the|items|to)|drop\s+(?:here|items)|reorder/i.test(text) &&
+        (hasSubmitAction() || doc.querySelector("[class*='question'], [class*='match']"))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   async function autoSubmitPage(reason = "自动提交") {
+    if (isManualDragPage()) {
+      updateRunLog("检测到拖动/排序题，需要用户手动拖动，已跳过自动提交", "warn");
+      setStatus("拖动/排序题需要手动完成，未自动提交。");
+      return false;
+    }
+    if (isDiscussionPage()) {
+      const editor = pageDocuments().map((doc) => doc.querySelector(
+        "textarea[placeholder*='评论'], [contenteditable='true'][data-placeholder*='评论']"
+      )).find((element) => element && visible(element));
+      const text = editor ? String(editor.value || editor.textContent || "").trim() : "";
+      if (!text) {
+        updateRunLog("讨论编辑器为空，跳过自动发布", "warn");
+        return false;
+      }
+      const key = `${location.href}|${text}|${discussionItemCount()}`;
+      if (submittedDiscussionKeys.has(key)) {
+        updateRunLog("该讨论已发布过，跳过重复发布", "warn");
+        return true;
+      }
+      const publish = findDiscussionPublishButton(editor);
+      if (publish) {
+        submittedDiscussionKeys.add(key);
+        armSubmitHandoff("发布");
+        updateRunLog("自动提交：发布讨论评论", "warn");
+        publish.element.click();
+        await wait(900);
+        return true;
+      }
+      updateRunLog("未找到当前评论的发布按钮，跳过发布", "warn");
+      return false;
+    }
     const submit = findSubmitButton();
     if (submit) {
       // Arm the existing post-submit watcher so the next module starts
@@ -2827,6 +2896,68 @@
     return true;
   }
 
+  async function answerDragPage() {
+    const question = currentQuestion() || (document.body?.innerText || "").slice(0, 1800).trim();
+    const context = pageContextForModel().slice(0, 10000);
+    const items = [];
+    const addItem = (value) => {
+      const text = String(value || "").trim().replace(/\s+/g, " ");
+      if (text && text.length <= 500 && !items.includes(text)) items.push(text);
+    };
+    for (const doc of pageDocuments()) {
+      for (const element of doc.querySelectorAll(
+        "[draggable='true'], .drag-item, [class*='drag-item'], [class*='dragItem'], " +
+        "[class*='sort-item'], [class*='sortItem'], [class*='sortable']"
+      )) {
+        if (!visible(element) || element.closest("#freeocs-ucampus-panel, #uca-panel")) continue;
+        let text = (element.innerText || element.textContent || "").trim().replace(/\s+/g, " ");
+        // Some U校园 drag items expose only their number ("1.") while the
+        // actual summary lives in the surrounding card/parent.
+        if (/^\d+[.)、:：]?$/.test(text)) {
+          const host = element.closest(
+            "li, .item, [class*='item'], [class*='card'], [class*='summary'], " +
+            "[class*='sentence'], [class*='option'], [class*='content']"
+          );
+          if (host) text = (host.innerText || host.textContent || "").trim().replace(/\s+/g, " ");
+        }
+        addItem(text);
+      }
+    }
+    if (!question && items.length < 2) {
+      updateRunLog("拖拽页没有可识别的题目或拖动项，无法生成答案", "warn");
+      return false;
+    }
+    if (items.length) {
+      updateRunLog(`拖动项：${items.map((item) => item.slice(0, 80)).join(" | ")}`, "info");
+    }
+    const prompt = [
+      question || "拖动/排序题",
+      context && context.slice(0, 80) !== question.slice(0, 80) ? `阅读材料：\n${context}` : "",
+      items.length ? "拖动项（请根据材料判断正确顺序，只输出字母）：" : "",
+      items.map((item, index) => `${String.fromCharCode(65 + index)}. ${item}`).join("\n"),
+      "不要直接按 A B C D E F 的初始顺序输出；必须根据材料内容排序。",
+    ].filter(Boolean).join("\n\n");
+    try {
+      const result = await request("/api/answer", {
+        question: prompt,
+        question_type: "drag",
+      });
+      const answer = String(result?.answer || "").trim();
+      if (!answer) {
+        updateRunLog("AI 未生成拖拽/排序答案", "warn");
+        return false;
+      }
+      // The page shows lettered drag items; keep the letter order visible.
+      setPanelAnswer(answer.toUpperCase(), "拖动/排序答案");
+      updateRunLog(`已生成拖动/排序答案：${answer.slice(0, 300)}`, "success");
+      setStatus("拖动/排序答案已显示；请手动拖动后提交。");
+      return true;
+    } catch (error) {
+      updateRunLog(`生成拖动/排序答案失败：${error.message}`, "error");
+      return false;
+    }
+  }
+
   async function processQuestion() {
     if (dismissBlockingDialog()) await wait(500);
     if (isAuthPage()) {
@@ -2859,6 +2990,15 @@
     if (hasSubmitAction() && !initialAnswerable && !hasQuestionInteractives() &&
       !isVoicePracticePage() && !hasVideoPlayerContainer()) {
       await waitingForManual("当前页面已到提交步骤，等待手动提交");
+      return false;
+    }
+    if (isManualDragPage()) {
+      const answered = await answerDragPage();
+      await waitingForManual(
+        answered
+          ? "拖动/排序答案已显示；请手动拖动后提交"
+          : "检测到拖动/排序题，请手动拖动完成后提交"
+      );
       return false;
     }
     if (isDiscussionPage()) {
