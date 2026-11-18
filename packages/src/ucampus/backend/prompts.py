@@ -23,6 +23,7 @@ TYPE_LABELS = {
     "oral": "口语题",
     "discussion": "讨论题",
     "drag": "拖动/排序题",
+    "batch": "同页多道题",
 }
 
 
@@ -55,6 +56,12 @@ def build_prompt(payload: dict[str, Any]) -> str:
                 "用空格分隔，例如 D A B C。不要 JSON，不要编号，不要解释。"
             )
         parts.append("只输出这一行字母，不要输出任何其它文字。")
+    elif question_type == "batch":
+        parts.append(
+            "这是同一页面的多道题。请严格按题号顺序作答，返回 JSON 对象："
+            '{"answers":["第1题答案","第2题答案",...]}。'
+            "每项只写该题答案，不要解释、不要额外字段。"
+        )
     elif question_type == "drag":
         parts.append(
             "这是拖动/排序题。拖动项已经用 A、B、C 等字母标注。请根据题目和材料，"
@@ -102,6 +109,8 @@ def build_prompt(payload: dict[str, Any]) -> str:
 
 
 def parse_answer(raw: str, question_type: str, blank_count: int = 0) -> tuple[str, str]:
+    if question_type == "batch":
+        return _parse_batch(raw), ""
     if question_type == "blanks":
         return _parse_blanks(raw, blank_count), ""
     if question_type == "matching":
@@ -125,6 +134,19 @@ def _json_candidate(raw: str) -> Any:
             except json.JSONDecodeError:
                 pass
     return None
+
+
+def _parse_batch(raw: str) -> str:
+    decoded = _json_candidate(raw)
+    values = []
+    if isinstance(decoded, dict):
+        values = decoded.get("answers") or decoded.get("answer") or []
+    elif isinstance(decoded, list):
+        values = decoded
+    if not isinstance(values, list):
+        values = [values]
+    cleaned = [str(item).strip() for item in values if str(item).strip()]
+    return "\n".join(cleaned) if cleaned else (raw or "").strip()
 
 
 def _parse_standard(raw: str) -> tuple[str, str]:

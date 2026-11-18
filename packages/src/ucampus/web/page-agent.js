@@ -323,9 +323,22 @@
   function audioSources() {
     const found = new Map();
     for (const doc of pageDocuments()) {
-      for (const element of doc.querySelectorAll("audio, audio source, [src]")) {
-        const raw = element.currentSrc || element.src || element.getAttribute("src");
-        if (!raw || raw.startsWith("blob:") || raw.startsWith("data:")) continue;
+      for (const element of doc.querySelectorAll(
+        "audio, audio source, .insert-custom-audio-player, [islistener], " +
+        "[data-audio], [data-sound], [data-url], [src]"
+      )) {
+        const raw = element.currentSrc || element.src || element.getAttribute("src") ||
+          element.getAttribute("data-audio") || element.getAttribute("data-sound") ||
+          element.getAttribute("data-url");
+        if (!raw) continue;
+        const isAudioElement = element.tagName === "AUDIO" || element.tagName === "SOURCE";
+        if (!isAudioElement && !/audio|sound|listen|voice/i.test(
+          `${element.className || ""} ${element.id || ""}`
+        )) continue;
+        if (raw.startsWith("blob:") || raw.startsWith("data:")) {
+          found.set(raw, true);
+          continue;
+        }
         if (!/\.(?:mp3|wav|m4a|aac|ogg|flac)(?:[?#]|$)/i.test(raw) &&
           !/\/audio\//i.test(raw)) continue;
         try {
@@ -349,12 +362,55 @@
     return btoa(binary);
   }
 
+  async function primePageAudio() {
+    const text = (document.body?.innerText || "").slice(0, 8000);
+    if (!/听录音|听单词|listen|audio|朗读所听到/i.test(text)) return;
+    let clicked = 0;
+    for (const doc of pageDocuments()) {
+      if (!visibleDocument(doc)) continue;
+      const controls = [...doc.querySelectorAll(
+        ".audio-origin .audio-control-trumpet, .audio-origin .audio-control-box, " +
+        ".question-audio .audio-control-trumpet, .audio-control-trumpet, " +
+        ".insert-custom-audio-player, [islistener], " +
+        "[class*='audio'] [class*='play']"
+      )].filter((element) =>
+        visible(element) && !element.closest("#freeocs-ucampus-panel, #uca-panel")
+      );
+      for (const element of controls.slice(0, 20)) {
+        try {
+          element.click();
+          clicked += 1;
+          await wait(220);
+        } catch (_) {
+          // Ignore decorative controls.
+        }
+      }
+    }
+    if (clicked) {
+      updateRunLog(`已触发 ${clicked} 个听力音频加载`, "info");
+      await wait(1200);
+    }
+  }
+
   async function transcribeAudioUrl(url) {
     if (AUDIO_TRANSCRIPT_CACHE.has(url)) return AUDIO_TRANSCRIPT_CACHE.get(url);
-    const response = await request("/api/transcribe-url", {
-      url,
-      referer: location.href,
-    });
+    let response;
+    if (url.startsWith("blob:") || url.startsWith("data:")) {
+      // U校园 的单词音频经常是页面内生成的 blob，服务端无法直接下载。
+      const media = await fetch(url, { credentials: "include" });
+      if (!media.ok) throw new Error(`音频读取失败：HTTP ${media.status}`);
+      const buffer = await media.arrayBuffer();
+      if (buffer.byteLength < 100) throw new Error("音频内容为空");
+      response = await request("/api/transcribe", {
+        audio_base64: arrayBufferToBase64(buffer),
+        filename: "page-audio.webm",
+      });
+    } else {
+      response = await request("/api/transcribe-url", {
+        url,
+        referer: location.href,
+      });
+    }
     const text = (response?.text || "").trim();
     AUDIO_TRANSCRIPT_CACHE.set(url, text);
     return text;
@@ -572,6 +628,9 @@
           element: group,
           stem: group.querySelector(".ques-title")?.innerText?.trim() || "",
           options,
+          // Existing selections are intentionally ignored; the user wants
+          // pre-filled pages re-answered.
+          answered: false,
           multi: Boolean(group.querySelector(
             "[role='checkbox'], input[type='checkbox'], .checkbox, .check-box"
           )) || /multiple|choose all|select all|多选|选出所有|所有正确/i.test(groupText),
@@ -584,6 +643,12 @@
 
   function dropdownKey(item) {
     return `${location.href}|${item.stem}|${item.options.join("|")}`;
+  }
+
+  function dropdownHasAnswer(_item) {
+    // Treat pre-filled values as unanswered: re-answer every page once.
+    // In-run progress is tracked by answeredDropdownKeys instead.
+    return false;
   }
 
   function optionDropdowns(doc) {
@@ -772,6 +837,7 @@
         stem: (container?.innerText || questionForDocument(doc) || "")
           .trim().slice(0, 2000),
         element: container || doc.body,
+        answered: false,
       });
     }
     return groups;
@@ -815,7 +881,7 @@
         options,
         stem,
         element: container || doc.body,
-        answered: options.some((option) => option.input.checked),
+        answered: false,
       });
     }
     return groups;
@@ -829,7 +895,7 @@
       const dropdowns = optionDropdowns(doc);
       if (!dropdowns.length) continue;
       const pending = dropdowns.find((item) =>
-        !answeredDropdownKeys.has(dropdownKey(item))
+        !dropdownHasAnswer(item) && !answeredDropdownKeys.has(dropdownKey(item))
       );
       return pending ? pending.stem : "";
     }
@@ -837,7 +903,7 @@
       const groups = checkboxGroups(doc);
       if (!groups.length) continue;
       const pending = groups.find((group) =>
-        !answeredChoiceKeys.has(choiceGroupKey(group))
+        !group.answered && !answeredChoiceKeys.has(choiceGroupKey(group))
       );
       return pending ? pending.stem : "";
     }
@@ -852,7 +918,7 @@
     for (const doc of pageDocuments()) {
       const groups = optionChoiceGroups(doc);
       if (!groups.length) continue;
-      const pending = groups.find((group) => !answeredChoiceKeys.has(choiceGroupKey(group)));
+      const pending = groups.find((group) => !group.answered && !answeredChoiceKeys.has(choiceGroupKey(group)));
       return pending ? pending.stem : "";
     }
     for (const doc of pageDocuments()) {
@@ -901,7 +967,7 @@
       const checkboxGroupsInDoc = checkboxGroups(doc);
       if (checkboxGroupsInDoc.length) {
         const pending = checkboxGroupsInDoc.find((group) =>
-          !answeredChoiceKeys.has(choiceGroupKey(group))
+          !group.answered && !answeredChoiceKeys.has(choiceGroupKey(group))
         );
         if (!pending) {
           return { type: "unsupported", reason: "本页选择题已全部作答。" };
@@ -926,6 +992,7 @@
           type: "choice",
           options: pending.options,
           group: pending,
+          groups: radioGroupsInDoc,
           radioGroup: true,
           doc,
         };
@@ -934,7 +1001,7 @@
       const dropdowns = optionDropdowns(doc);
       if (dropdowns.length) {
         const pending = dropdowns.find((item) =>
-          !answeredDropdownKeys.has(dropdownKey(item))
+          !dropdownHasAnswer(item) && !answeredDropdownKeys.has(dropdownKey(item))
         );
         if (!pending) {
           return { type: "unsupported", reason: "本页下拉题已全部作答。" };
@@ -951,7 +1018,7 @@
       const choiceGroups = optionChoiceGroups(doc);
       if (choiceGroups.length) {
         const group = choiceGroups.find((item) =>
-          !answeredChoiceKeys.has(choiceGroupKey(item))
+          !item.answered && !answeredChoiceKeys.has(choiceGroupKey(item))
         );
         if (!group) {
           return { type: "unsupported", reason: "本页选择题已全部作答。" };
@@ -1244,9 +1311,25 @@
         if (!hiddenOption) throw new Error("下拉选项未能展开或未找到匹配项。");
         hiddenOption.click();
       }
-      await wait(300);
-      if ((pending.textElement?.innerText || "").trim() === "点击选择") {
-        throw new Error("下拉选项未能选中。");
+      await wait(450);
+      // The component may replace its DOM when selecting; re-query instead of
+      // holding a stale .user-answer-text reference.
+      const currentText = (pending.element.querySelector(
+        ".user-answer-text, .user-answer"
+      )?.innerText || "").trim();
+      if (!currentText || /点击选择|请选择/.test(currentText)) {
+        const hiddenOption = [...pending.element.querySelectorAll("i")]
+          .find((item) => (item.innerText || "").trim() === optionText);
+        if (hiddenOption) {
+          hiddenOption.click();
+          await wait(350);
+        }
+        const retryText = (pending.element.querySelector(
+          ".user-answer-text, .user-answer"
+        )?.innerText || "").trim();
+        if (!retryText || /点击选择|请选择/.test(retryText)) {
+          throw new Error("下拉选项未能选中。");
+        }
       }
       answeredDropdownKeys.add(dropdownKey(pending));
       return;
@@ -2285,18 +2368,23 @@
   }
 
   function findSubmitConfirmButton() {
-    const labels = ["确定", "确认", "提交", "确定提交", "确认提交", "继续"];
+    const labels = new Set(["确定", "确 定", "确认", "确定提交", "确认提交", "继续", "提交"]);
     for (const doc of pageDocuments()) {
-      for (const element of doc.querySelectorAll(
-        "button, [role='button'], .ant-btn, [class*='confirm'], [class*='submit']"
-      )) {
-        if (!visible(element) || element.closest("#freeocs-ucampus-panel, #uca-panel")) continue;
-        if (element.disabled || element.getAttribute("aria-disabled") === "true") continue;
-        const label = (element.innerText || element.getAttribute("aria-label") || "")
-          .trim().replace(/\s+/g, "");
-        if (!label || /取消|关闭|返回|再想想/.test(label)) continue;
-        if (labels.includes(label) || /确定|确认/.test(label)) {
-          return { element, label };
+      if (!visibleDocument(doc)) continue;
+      // A page can have a visible bottom "提交" button behind the modal.
+      // Prefer buttons inside the visible dialog, otherwise we click the
+      // underlying submit button forever and the dialog never closes.
+      const dialogs = [...doc.querySelectorAll(
+        "[role='dialog'], .ant-modal, .ant-modal-confirm, .ant-modal-wrap"
+      )].filter((element) => visible(element));
+      for (const dialog of dialogs) {
+        for (const element of dialog.querySelectorAll("button, a, [role='button'], .ant-btn")) {
+          if (!visible(element) || element.disabled ||
+            element.getAttribute("aria-disabled") === "true") continue;
+          const label = (element.innerText || element.getAttribute("aria-label") || "")
+            .trim().replace(/\s+/g, "");
+          if (!label || /取消|关闭|返回|再想想/.test(label)) continue;
+          if (labels.has(label)) return { element, label };
         }
       }
     }
@@ -2403,8 +2491,9 @@
       if (confirm && submitDialogVisible()) {
         updateRunLog(`自动提交：点击确认“${confirm.label}”`, "warn");
         confirm.element.click();
-        await wait(600);
+        await wait(900);
       }
+      await wait(700);
       return true;
     }
     if (submitDialogVisible()) {
@@ -2413,7 +2502,7 @@
         armSubmitHandoff("提交确认");
         updateRunLog(`自动提交：确认“${confirm.label}”`, "warn");
         confirm.element.click();
-        await wait(600);
+        await wait(900);
         return true;
       }
     }
@@ -3069,6 +3158,82 @@
     }
   }
 
+  async function answerChoiceBatch(controls, audioTranscript = "") {
+    const groups = controls.groups || (controls.group ? [controls.group] : []);
+    if (groups.length <= 1) return false;
+    const lines = groups.map((group, index) => {
+      const options = (group.options || []).map((option, optionIndex) =>
+        `${String.fromCharCode(65 + optionIndex)}. ${option.text}`
+      ).join("\n");
+      return `${index + 1}. ${group.stem || "未命名题目"}\n选项：\n${options}`;
+    });
+    const question = [
+      audioTranscript ? `[听力原文]\n${audioTranscript}` : "",
+      ...lines,
+    ].filter(Boolean).join("\n\n");
+    updateRunLog(`同页 ${groups.length} 道选择题合并为一次 AI 调用`, "info");
+    const result = await request("/api/answer", {
+      question,
+      question_type: "batch",
+      context: pageContextForModel(),
+    });
+    const answers = String(result?.answer || "").split("\n").map((item) => item.trim()).filter(Boolean);
+    if (!answers.length) throw new Error("模型未返回批量答案");
+    for (const [index, group] of groups.entries()) {
+      const value = answers[index];
+      if (!value) continue;
+      await applyAnswer(value, {
+        ...controls,
+        type: group.multi || controls.type === "multi-choice" ? "multi-choice" : "choice",
+        options: group.options,
+        group,
+        radioGroup: !group.multi && Boolean(group.inputs?.[0]?.type === "radio"),
+        doc: controls.doc,
+      });
+      await wait(250);
+    }
+    updateRunLog(`已批量填入 ${groups.length} 道选择题`, "success", true);
+    await clickPageAction();
+    return true;
+  }
+
+  async function answerDropdownBatch(controls, audioTranscript = "") {
+    const dropdowns = controls.dropdowns || [];
+    if (dropdowns.length <= 1) return false;
+    const lines = dropdowns.map((item, index) => {
+      const options = (item.options || []).map((text, optionIndex) =>
+        `${String.fromCharCode(65 + optionIndex)}. ${text}`
+      ).join("\n");
+      return `${index + 1}. ${item.stem || "未命名题目"}\n选项：\n${options}`;
+    });
+    const question = [
+      audioTranscript ? `[听力原文]\n${audioTranscript}` : "",
+      ...lines,
+    ].filter(Boolean).join("\n\n");
+    updateRunLog(`同页 ${dropdowns.length} 道下拉题合并为一次 AI 调用`, "info");
+    const result = await request("/api/answer", {
+      question,
+      question_type: "batch",
+      context: pageContextForModel(),
+    });
+    const answers = String(result?.answer || "").split("\n").map((item) => item.trim()).filter(Boolean);
+    if (!answers.length) throw new Error("模型未返回批量答案");
+    for (const [index, item] of dropdowns.entries()) {
+      const value = answers[index];
+      if (!value) continue;
+      await applyAnswer(value, {
+        ...controls,
+        type: "dropdown",
+        dropdown: item,
+        options: (item.options || []).map((text) => ({ text })),
+      });
+      await wait(250);
+    }
+    updateRunLog(`已批量填入 ${dropdowns.length} 道下拉题`, "success", true);
+    await clickPageAction();
+    return true;
+  }
+
   async function processQuestion() {
     if (dismissBlockingDialog()) await wait(500);
     if (isAuthPage()) {
@@ -3238,8 +3403,26 @@
     }
 
     let audioTranscript = videoTranscript;
+    if (!videoTranscript) await primePageAudio();
     const audioList = audioSources();
     const controls = answerControls();
+    if (controls.type === "dropdown" && (controls.dropdowns || []).length > 1) {
+      try {
+        await answerDropdownBatch(controls, audioTranscript);
+        return { type: "question" };
+      } catch (error) {
+        updateRunLog(`批量下拉作答失败，回退逐题处理：${error.message}`, "warn");
+      }
+    }
+    if ((controls.type === "choice" || controls.type === "multi-choice") &&
+      (controls.groups || []).length > 1) {
+      try {
+        await answerChoiceBatch(controls, audioTranscript);
+        return { type: "question" };
+      } catch (error) {
+        updateRunLog(`批量选择题作答失败，回退逐题处理：${error.message}`, "warn");
+      }
+    }
     if (controls.type === "dictation") {
       await answerDictation(controls);
       return { type: "question" };
@@ -3270,17 +3453,20 @@
       return { type: "question" };
     }
     const blankAudio = controls.type === "blanks" && audioList.length > 1;
-    const audioLimit = blankAudio ? 12 : 3;
+    const listeningPage = /听录音|听单词|listen to|listening|选出你所听到/i.test(
+      document.body?.innerText || ""
+    );
+    const audioLimit = (blankAudio || listeningPage) ? 12 : 3;
     if (!videoTranscript && audioList.length >= 1 && audioList.length <= audioLimit) {
       const pageKey = `${location.href}|${blankAudio ? "blanks" : "normal"}`;
       if (!PAGE_TRANSCRIPT_CACHE.has(pageKey)) {
         updateRunLog(`检测到 ${audioList.length} 个听力音频，开始转写`, "info");
         setStatus("正在转写听力音频…");
         let text = "";
-        if (blankAudio) {
+        if (blankAudio || listeningPage) {
           const parts = await pageAudioTranscripts(12, 12);
           text = parts
-            .map((part, index) => part ? `${index + 1}. ${part}` : "")
+            .map((part, index) => part ? `音频${index + 1}：${part}` : "")
             .filter(Boolean)
             .join("\n");
         } else {
@@ -3303,11 +3489,6 @@
     const question = currentQuestion();
     if (submittedSteps.has(currentStepKey()) && !hasSubmitAction()) {
       updateRunLog("该页已提交，跳过重复提交", "info");
-      return { type: "content" };
-    }
-    if (controlsAnswered(controls)) {
-      updateRunLog("检测到题目已作答，跳过重复作答", "info");
-      await clickPageAction();
       return { type: "content" };
     }
     let questionForModel = audioTranscript
@@ -3576,8 +3757,9 @@
           updateRunLog(`自动开始下一模块失败：${error.message}`, "error");
           return;
         }
-        if (isCourseDetailPage()) await startFromCourseDetail();
-        else await runAutomation();
+        // The backend queues a "start" command to this page.  Do not also
+        // call runAutomation() here, or two automation loops race and click
+        // adjacent Practice tabs back and forth.
         return;
       }
     } finally {
