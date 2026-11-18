@@ -75,7 +75,9 @@
   let currentStatus = "已连接，等待控制台";
   let runState = loadRunState();
   let autoSubmitEnabled = gmGet("ucaAutoSubmit", false) === true;
-  const submittedDiscussionKeys = new Set();
+  const submittedDiscussionKeys = new Set(
+    (gmGet("ucaDiscussionSubmitKeys", []) || []).filter((item) => typeof item === "string")
+  );
   const moduleSettings = { autoRecordSpeaking: true };
 
   function applyAgentSettings(settings) {
@@ -2201,6 +2203,11 @@
   }
 
   async function answerDiscussion() {
+    const discussionPageKey = `page|${location.href}`;
+    if (submittedDiscussionKeys.has(discussionPageKey)) {
+      updateRunLog("当前讨论页已经发布过评论，跳过重复生成", "warn");
+      return false;
+    }
     for (const doc of pageDocuments()) {
       const editor = doc.querySelector(
         "textarea[placeholder*='评论'], [contenteditable='true'][data-placeholder*='评论']"
@@ -2217,6 +2224,15 @@
         question_type: "discussion",
       });
       if (!result.answer) return false;
+      const normalizedAnswer = String(result.answer).replace(/\s+/g, "").slice(0, 160);
+      const comments = [...doc.querySelectorAll(
+        "[class*='comment-list'], [class*='commentList'], [class*='comment_list'], " +
+        "[class*='discussion-cloud-recordList-item']"
+      )].map((element) => String(element.innerText || "").replace(/\s+/g, "")).join("");
+      if (normalizedAnswer && comments.includes(normalizedAnswer)) {
+        updateRunLog("讨论区已存在相同评论，跳过重复发布", "warn");
+        return false;
+      }
       writeText(editor, result.answer.slice(0, 500));
       await wait(500);
       updateRunLog("讨论答案已填入；未自动发布", "success", true);
@@ -2334,14 +2350,17 @@
         updateRunLog("讨论编辑器为空，跳过自动发布", "warn");
         return false;
       }
-      const key = `${location.href}|${text}|${discussionItemCount()}`;
-      if (submittedDiscussionKeys.has(key)) {
-        updateRunLog("该讨论已发布过，跳过重复发布", "warn");
+      const key = `${location.href}|${text.replace(/\s+/g, " ").trim()}`;
+      const pageKey = `page|${location.href}`;
+      if (submittedDiscussionKeys.has(pageKey) || submittedDiscussionKeys.has(key)) {
+        updateRunLog("该讨论页已发布过评论，跳过重复发布", "warn");
         return true;
       }
       const publish = findDiscussionPublishButton(editor);
       if (publish) {
+        submittedDiscussionKeys.add(pageKey);
         submittedDiscussionKeys.add(key);
+        gmSet("ucaDiscussionSubmitKeys", [...submittedDiscussionKeys].slice(-50));
         armSubmitHandoff("发布");
         updateRunLog("自动提交：发布讨论评论", "warn");
         publish.element.click();
@@ -2394,8 +2413,8 @@
     return Boolean(findSubmitButton()) || submitDialogVisible();
   }
 
-  async function waitingForManual(reason) {
-    if (autoSubmitEnabled && /提交|交卷|发布/.test(reason)) {
+  async function waitingForManual(reason, allowAutoSubmit = true) {
+    if (allowAutoSubmit && autoSubmitEnabled && /提交|交卷|发布/.test(reason)) {
       if (await autoSubmitPage(reason)) return;
     }
     manualStop = true;
@@ -2517,10 +2536,37 @@
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       const scores = items.map(dubbingScore);
-      if (scores.every((value) => value !== null)) return scores;
-      await wait(1000);
+      if (scores.every((value) => value !== null && Number(value) > 0)) return scores;
+      dismissRecordingError();
+      await wait(700);
     }
     return items.map(dubbingScore);
+  }
+
+  function dismissRecordingError() {
+    let clicked = false;
+    for (const doc of pageDocuments()) {
+      const dialogs = [...doc.querySelectorAll(
+        ".ant-modal, [class*='modal'], [class*='dialog'], [role='dialog']"
+      )].filter((element) =>
+        visible(element) && !element.closest("#freeocs-ucampus-panel, #uca-panel")
+      );
+      for (const dialog of dialogs) {
+        const text = dialog.innerText || "";
+        if (!/录音启动超时|录音失败|录音未|录音上传失败|请稍后重试/.test(text)) continue;
+        const button = [...dialog.querySelectorAll("button, [role='button'], a")]
+          .find((element) => visible(element) &&
+            /^(确定|知道了|我知道了)$/.test(
+              (element.innerText || "").replace(/\s+/g, "")
+            ));
+        if (button) {
+          button.click();
+          updateRunLog("已自动关闭录音错误弹窗", "warn");
+          clicked = true;
+        }
+      }
+    }
+    return clicked;
   }
 
   async function recordDubbingItem(item) {
@@ -2553,8 +2599,10 @@
     try { source.stop(); } catch (_) {}
     await context.close();
     pageWindow.__ucaDubbingStream = null;
+    // U校园 评分是异步返回的；马上读通常是 0/空。等评分出现后再判断。
+    const measured = await waitDubbingScores([item], 12000);
+    const score = Number(measured[0] || 0);
     const scoreText = (item.item?.querySelector(".score")?.innerText || "").trim();
-    const score = Number((scoreText.match(/\d+/) || [0])[0]);
     updateRunLog(`第 ${item.index + 1} 句录制完成${scoreText ? `，得分 ${scoreText}` : ""}`, "success", true);
     return score;
   }
@@ -2563,7 +2611,7 @@
     const pending = (controls.items || []).filter((item) => {
       if (!item.text) return false;
       const score = dubbingScore(item);
-      return score === null;
+      return score === null || Number(score) <= 0;
     });
     if (!pending.length) {
       updateRunLog("朗读项均已有评分，直接继续", "info");
@@ -2573,16 +2621,45 @@
     const scores = [];
     for (const item of pending) {
       if (!automationRunning) return false;
-      scores.push(await recordDubbingItem(item));
+      let score = 0;
+      try {
+        score = await recordDubbingItem(item);
+      } catch (error) {
+        updateRunLog(`第 ${item.index + 1} 句录音异常：${error.message}`, "warn");
+      }
+      if (!score && automationRunning) {
+        dismissRecordingError();
+        await wait(1200);
+        updateRunLog(`第 ${item.index + 1} 句未录上，正在重录`, "warn");
+        try {
+          score = await recordDubbingItem(item);
+        } catch (error) {
+          updateRunLog(`第 ${item.index + 1} 句重录失败：${error.message}`, "error");
+        }
+      }
+      scores.push(score);
       await wait(600);
     }
-    const scored = scores.filter((value) => Number.isFinite(value));
+    dismissRecordingError();
+    await wait(800);
+    // Give the page a final chance to finish asynchronous scoring.
+    await waitDubbingScores(controls.items || [], 10000);
+    const failed = (controls.items || []).filter((item) => {
+      const score = dubbingScore(item);
+      return score === null || Number(score) <= 0;
+    });
+    const scored = scores.filter((value) => Number.isFinite(value) && value > 0);
     if (scored.length) {
       const average = scored.reduce((sum, value) => sum + value, 0) / scored.length;
       updateRunLog(
         `朗读完成：${scored.join(", ")}，平均 ${average.toFixed(1)}`,
         average >= 60 ? "success" : "warn"
       );
+    }
+    if (failed.length) {
+      updateRunLog(`提交前复检：仍有 ${failed.length} 句未录上，已停止自动提交`, "error");
+      await waitingForManual("朗读录音未全部成功，请手动重录后提交", false);
+      return false;
     }
     if (!automationRunning) return false;
     await clickPageAction();
@@ -2664,6 +2741,8 @@
     try { source.stop(); } catch (_) {}
     await context.close();
     pageWindow.__ucaDubbingStream = null;
+    dismissRecordingError();
+    await wait(500);
 
     const scores = [...doc.querySelectorAll("*")]
       .filter((element) => {
@@ -3014,6 +3093,10 @@
         runState.completed += 1;
         await waitingForManual("讨论答案已填入，等待手动发布");
         return false;
+      }
+      if (submittedDiscussionKeys.has(`page|${location.href}`)) {
+        updateRunLog("当前讨论页已发布，跳过重复评论", "info");
+        return { type: "content" };
       }
       updateRunLog("讨论页没有可填写的编辑器，自动流程已停止", "error");
       return false;
@@ -3387,6 +3470,10 @@
 
   function armSubmitHandoff(label) {
     if (submitHandoff) return;
+    if (isDiscussionPage()) {
+      submittedDiscussionKeys.add(`page|${location.href}`);
+      gmSet("ucaDiscussionSubmitKeys", [...submittedDiscussionKeys].slice(-50));
+    }
     submitHandoff = {
       signature: pageSignature(),
       at: Date.now(),
@@ -3422,14 +3509,23 @@
         }
         if (submitDialogVisible()) continue;
         if (isDiscussionPage()) {
-          // Publishing clears/moves the comment editor but stays on the same
-          // discussion page.  Move to the next section/tab explicitly.
+          // Publishing clears the editor but leaves us on the same discussion
+          // page.  Always move forward; never restart and answer it again.
           const afterPublish = nextLearningTarget(true);
-          if (afterPublish) {
-            updateRunLog(`发布后进入下一项：${afterPublish.label}`, "info");
-            afterPublish.element.click();
-            await wait(1800);
-            if (!hasContentForAutomation() && !nextLearningTarget(true)) continue;
+          if (!afterPublish) {
+            clearSubmitHandoff("评论已发布；没有下一项，自动流程结束");
+            setStatus("评论已发布，未找到下一项。");
+            updateRunLog("评论已发布；没有下一项，流程结束", "success");
+            return;
+          }
+          updateRunLog(`发布后进入下一项：${afterPublish.label}`, "info");
+          afterPublish.element.click();
+          await wait(1800);
+          if (isDiscussionPage() || (!hasContentForAutomation() && !nextLearningTarget(true))) {
+            clearSubmitHandoff("评论已发布；页面没有切换，已停止重复作答");
+            setStatus("评论已发布，页面未切换，已停止。");
+            updateRunLog("评论已发布；页面未切换，停止重复作答", "warn");
+            return;
           }
         }
         if (!hasContentForAutomation() && !nextLearningTarget(true) && !hasSubmitAction()) {
